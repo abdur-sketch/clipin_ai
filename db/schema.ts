@@ -18,8 +18,11 @@ export const clips = sqliteTable("clips", {
   id: text("id").primaryKey(), projectId: text("project_id").notNull(), startTime: real("start_time").notNull(),
   endTime: real("end_time").notNull(), score: integer("score").notNull(), title: text("title").notNull(),
   hook: text("hook").notNull(), caption: text("caption").notNull(), subtitles: text("subtitles").notNull().default("[]"),
+  reason: text("reason"), category: text("category"),
   style: text("style").notNull().default("bold"), faceTracking: integer("face_tracking", { mode: "boolean" }).notNull().default(true),
-  hookOverlay: integer("hook_overlay", { mode: "boolean" }).notNull().default(true), status: text("status").notNull().default("ready"),
+  hookOverlay: integer("hook_overlay", { mode: "boolean" }).notNull().default(true), aspectRatio: text("aspect_ratio").notNull().default("9:16"),
+  fontSize: integer("font_size").notNull().default(48), watermark: integer("watermark", { mode: "boolean" }).notNull().default(true),
+  logoKey: text("logo_key"), status: text("status").notNull().default("ready"),
   renderedKey: text("rendered_key"), createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
 });
 

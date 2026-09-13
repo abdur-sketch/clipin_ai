@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 
-type AppEnv = { DB: D1Database; MEDIA: R2Bucket; OPENAI_API_KEY?: string; RENDER_SERVICE_URL?: string; RENDER_SERVICE_TOKEN?: string; YOUTUBE_API_KEY?: string; PUBLISH_SERVICE_URL?: string; BILLING_SERVICE_URL?: string; BILLING_SERVICE_TOKEN?: string };
+type AppEnv = { DB: D1Database; MEDIA: R2Bucket; OPENAI_API_KEY?: string; OPENAI_MODEL?: string; RENDER_SERVICE_URL?: string; RENDER_SERVICE_TOKEN?: string; YOUTUBE_API_KEY?: string; PUBLISH_SERVICE_URL?: string; BILLING_SERVICE_URL?: string; BILLING_SERVICE_TOKEN?: string };
 export const bindings = env as unknown as AppEnv;
 
 export async function currentUser() {
   const signedIn = await getChatGPTUser();
-  const email = signedIn?.email ?? "demo@clipin.local";
+  const email = signedIn?.email ?? "demo@kliyu.local";
   const name = signedIn?.displayName ?? "Demo Creator";
   const id = await sha(email);
   await bindings.DB.prepare("INSERT OR IGNORE INTO users (id,email,name,created_at) VALUES (?,?,?,?)").bind(id,email,name,Date.now()).run();

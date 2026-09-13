@@ -4,15 +4,27 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const user = await currentUser(), { id } = await params;
   const clip = await bindings.DB.prepare("SELECT clips.*,projects.storage_key FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?").bind(id,user.id).first();
   if (!clip) return jsonError("Clip tidak ditemukan",404);
-  if (!bindings.RENDER_SERVICE_URL) {
-    await bindings.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=?").bind(Date.now(),id).run();
-    return Response.json({ ok: true, status: "rendered", mode: "preview" });
-  }
+  if (!bindings.RENDER_SERVICE_URL) return jsonError("Export MP4 belum dikonfigurasi. Tambahkan RENDER_SERVICE_URL untuk menghubungkan layanan FFmpeg.",503);
   await bindings.DB.prepare("UPDATE clips SET status='rendering',updated_at=? WHERE id=?").bind(Date.now(),id).run();
   const response = await fetch(`${bindings.RENDER_SERVICE_URL}/render`, { method: "POST", headers: { "content-type": "application/json", ...(bindings.RENDER_SERVICE_TOKEN ? { authorization: `Bearer ${bindings.RENDER_SERVICE_TOKEN}` } : {}) }, body: JSON.stringify(clip) });
   if (!response.ok) {
     await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run();
     return jsonError(`Render service gagal (${response.status})`,502);
   }
-  return Response.json({ ok: true, status: "rendering" }, { status: 202 });
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.startsWith("video/")) {
+    if (!response.body) { await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run(); return jsonError("Layanan render tidak mengembalikan video",502); }
+    const key = `exports/${user.id}/${id}.mp4`;
+    await bindings.MEDIA.put(key,response.body,{httpMetadata:{contentType}});
+    await bindings.DB.prepare("UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();
+    return Response.json({ok:true,status:"rendered",downloadUrl:`/api/clips/${id}/download`});
+  }
+  const result = await response.json() as { downloadUrl?: string };
+  if (!result.downloadUrl) { await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run(); return jsonError("Layanan render tidak mengembalikan file MP4",502); }
+  const rendered = await fetch(result.downloadUrl);
+  if (!rendered.ok || !rendered.body) { await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run(); return jsonError("File hasil render tidak dapat diambil",502); }
+  const key = `exports/${user.id}/${id}.mp4`;
+  await bindings.MEDIA.put(key,rendered.body,{httpMetadata:{contentType:rendered.headers.get("content-type") || "video/mp4"}});
+  await bindings.DB.prepare("UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();
+  return Response.json({ok:true,status:"rendered",downloadUrl:`/api/clips/${id}/download`});
 }

@@ -3,108 +3,67 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
+const source = (path) => readFile(new URL(path, root), "utf8");
 
-test("build contains the complete CLIPIN AI product", async () => {
-  const [page, layout, worker] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/layout.tsx", root), "utf8"),
-    readFile(new URL("dist/server/index.js", root), "utf8"),
-  ]);
-  assert.match(layout, /CLIPIN AI — Long Video to Viral Clips/);
-  assert.match(layout, /metadataBase/);
-  assert.match(page, /Ubah video panjang menjadi/);
-  assert.match(page, /AI VIDEO REPURPOSING/);
-  assert.match(page, /Podcast Bisnis: Mulai dari Nol/);
-  assert.match(page, /New Project/);
-  assert.match(page, /My Clips/);
-  assert.match(page, /Projects/);
+test("build contains the KLIYU MVP product", async () => {
+  const [page, layout, worker] = await Promise.all([source("app/page.tsx"), source("app/layout.tsx"), source("dist/server/index.js")]);
+  assert.match(layout, /KLIYU — Create Your Moment/);
+  for (const feature of ["Kliyu AI", "Kliyu Studio", "My Clips", "Templates", "Projects", "Create with Kliyu AI"]) assert.ok(page.includes(feature), `missing ${feature}`);
   assert.match(worker, /api\/projects/);
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape|Building your site/);
 });
 
-test("source includes every interactive V0.1 flow", async () => {
-  const [page, css, layout, packageJson] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/globals.css", root), "utf8"),
-    readFile(new URL("app/layout.tsx", root), "utf8"),
-    readFile(new URL("package.json", root), "utf8"),
-  ]);
+test("new project accepts original files and honest direct video links", async () => {
+  const [page, projectsApi, processApi] = await Promise.all([source("app/page.tsx"), source("app/api/projects/route.ts"), source("app/api/projects/[id]/process/route.ts")]);
+  assert.match(page, /onStart: \(source\?: File \| string\)/);
+  assert.match(page, /accept="video\/mp4,video\/quicktime"/);
+  assert.match(page, /Link file video langsung/);
+  assert.match(page, /MP4\/WebM publik/);
+  assert.doesNotMatch(page, /Gunakan video contoh/);
+  assert.match(projectsApi, /Link video tidak valid/);
+  assert.match(processApi, /contentType\.startsWith\("video\/"\)/);
+});
 
-  for (const required of [
-    "Dashboard", "UploadModal", "processing", "progress", "Detected clips",
-    "filter === \"hot\"", "filter === \"rendered\"", "ClipEditor",
-    "Burn subtitles", "Face tracking", "Hook overlay", "Karaoke",
-    "Render all", "ProjectsPage", "toast", "inputRef.current?.click()",
-    "Video asli", "Link video", "submitLink", "sourceMode === \"link\"",
-  ]) assert.ok(page.includes(required), `missing flow: ${required}`);
+test("real OpenAI transcription and structured moment analysis replace fake output", async () => {
+  const [processApi, ai] = await Promise.all([source("app/api/projects/[id]/process/route.ts"), source("lib/kliyu-ai.ts")]);
+  assert.match(processApi, /api\.openai\.com\/v1\/audio\/transcriptions/);
+  assert.match(processApi, /openai-whisper/);
+  assert.match(ai, /api\.openai\.com\/v1\/responses/);
+  assert.match(ai, /json_schema/);
+  for (const criterion of ["Hook Strength", "Clarity", "Emotion", "Standalone Value", "Shareability", "Curiosity"]) assert.ok(ai.includes(criterion));
+  assert.doesNotMatch(processApi + ai, /demoMoments|clipin-demo/);
+});
 
+test("clip workflow includes filters, persistent Studio controls, render, and MP4 download", async () => {
+  const [page, clipApi, renderApi, downloadApi, logoApi] = await Promise.all([source("app/page.tsx"), source("app/api/clips/[id]/route.ts"), source("app/api/clips/[id]/render/route.ts"), source("app/api/clips/[id]/download/route.ts"), source("app/api/clips/[id]/logo/route.ts")]);
+  for (const feature of ["filter === \"hot\"", "filter === \"ready\"", "filter === \"rendered\"", "ClipPreview", "ClipEditor", "Automatic captions", "Face tracking", "Hook overlay", "KLIYU watermark", "Karaoke", "Export MP4"]) assert.ok(page.includes(feature), `missing ${feature}`);
+  for (const ratio of ["9:16", "1:1", "16:9"]) assert.ok(page.includes(ratio));
+  assert.match(clipApi, /status='ready',rendered_key=NULL/);
+  assert.match(renderApi, /RENDER_SERVICE_URL/);
+  assert.match(renderApi, /rendered_key/);
+  assert.match(downloadApi, /content-disposition/i);
+  assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
+});
+
+test("templates, metadata, social card, and responsive styling are present", async () => {
+  const [page, css, layout] = await Promise.all([source("app/page.tsx"), source("app/globals.css"), source("app/layout.tsx")]);
+  for (const category of ["Podcast", "Talking Head", "Business", "Education", "Motivation", "Islamic", "Gaming"]) assert.ok(page.includes(category));
+  assert.match(css, /\.template-grid/);
   assert.match(css, /@media\(max-width:720px\)/);
   assert.match(css, /prefers-reduced-motion:reduce/);
-  assert.match(css, /\.mobile-nav/);
   assert.match(layout, /\/og\.png/);
-  assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await access(new URL("public/og.png", root));
 });
 
-test("new project accepts original files and public video links", async () => {
-  const [page, projectsApi] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/api/projects/route.ts", root), "utf8"),
-  ]);
-  assert.match(page, /onStart: \(source\?: File \| string\)/);
-  assert.match(page, /accept="video\/mp4,video\/quicktime"/);
-  assert.match(page, /new URL\(value\)/);
-  assert.match(projectsApi, /sourceType = host\.includes\("youtube\.com"\)/);
-  assert.match(projectsApi, /Link video tidak valid/);
+test("Autopilot is excluded from the MVP navigation", async () => {
+  const page = await source("app/page.tsx");
+  const nav = page.slice(page.indexOf('<nav className="nav-list"'), page.indexOf('</nav>', page.indexOf('<nav className="nav-list"')));
+  assert.doesNotMatch(nav, /Autopilot|Affiliate|Auto posting/);
 });
 
-test("dummy dataset exposes hot, rendered, and editable clips", async () => {
-  const page = await readFile(new URL("app/page.tsx", root), "utf8");
-  const scores = [...page.matchAll(/score:\s*(\d+)/g)].map((match) => Number(match[1]));
-  assert.ok(scores.length >= 6);
-  assert.ok(scores.filter((score) => score >= 85).length >= 3);
-  assert.match(page, /status:\s*"rendered"/);
-  assert.match(page, /status:\s*"ready"/);
-  assert.match(page, /setSubtitle/);
-  assert.match(page, /setTracking/);
-  assert.match(page, /setHook/);
-  assert.match(page, /setStyle/);
-});
-
-test("detected clips supports preview, persistent edits, render all, and empty states", async () => {
-  const [page, renderApi] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/api/clips/[id]/render/route.ts", root), "utf8"),
-  ]);
-  for (const feature of ["ClipPreview", "renderAll", "renderingIds", "saveClip", "Tidak ada klip di filter ini", "Download caption", "downloadReport", "copySummary"]) assert.ok(page.includes(feature), `missing clips feature: ${feature}`);
-  assert.match(page, /fetch\(`\/api\/clips\/\$\{updated\.id\}`/);
-  assert.match(page, /setClipItems\(detail\.clips\.map/);
-  assert.match(renderApi, /status='rendered'/);
-  assert.match(renderApi, /mode: "preview"/);
-});
-
-test("autopilot covers monitoring, approval, posting, analytics, and affiliate", async () => {
-  const [page, automation, schema, migration] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/api/automation/route.ts", root), "utf8"),
-    readFile(new URL("db/schema.ts", root), "utf8"),
-    readFile(new URL("drizzle/0001_large_martin_li.sql", root), "utf8"),
-  ]);
-  for (const feature of ["Channel Watch","Full autopilot","Approval queue","Auto posting","Performance","Affiliate","save-rules","connect-channel"]) assert.ok((page+automation).toLowerCase().includes(feature.toLowerCase()),`missing ${feature}`);
-  for (const table of ["channels","postingRules","publications","notifications","referrals"]) assert.match(schema,new RegExp(table));
-  assert.match(migration,/CREATE TABLE `channels`/);
-  assert.match(migration,/CREATE TABLE `publications`/);
-});
-
-test("account tools persist settings, usage, plans, and profile actions", async () => {
-  const [page, account, schema, migration] = await Promise.all([
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/api/account/route.ts", root), "utf8"),
-    readFile(new URL("db/schema.ts", root), "utf8"),
-    readFile(new URL("drizzle/0002_icy_skullbuster.sql", root), "utf8"),
-  ]);
-  for (const feature of ["Upgrade Plan","SettingsPage","UpgradeModal","Billing & plan","Sign out","Coba gratis 7 hari","Save changes"]) assert.ok(page.includes(feature),`missing ${feature}`);
-  assert.match(account,/user_settings/); assert.match(account,/subscriptions/); assert.match(account,/trialing/);
-  assert.match(schema,/userSettings/); assert.match(schema,/subscriptions/);
-  assert.match(migration,/CREATE TABLE `user_settings`/); assert.match(migration,/CREATE TABLE `subscriptions`/);
+test("account settings and authenticated sign-out remain wired", async () => {
+  const [page, account] = await Promise.all([source("app/page.tsx"), source("app/api/account/route.ts")]);
+  for (const feature of ["Upgrade Plan", "SettingsPage", "Billing & plan", "Sign out", "Save changes"]) assert.ok(page.includes(feature));
+  assert.match(account, /user_settings/);
+  assert.match(account, /subscriptions/);
 });
