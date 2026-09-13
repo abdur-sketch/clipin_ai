@@ -4,15 +4,17 @@
 
 ## MVP v1.0
 
-- Sign in with ChatGPT dan data workspace per pengguna
+- Personal workspace dengan Sign in with ChatGPT
 - Upload MP4/MOV atau impor link file video MP4/WebM publik
 - Transkripsi OpenAI Whisper dengan timestamp
 - Kliyu AI moment detection memakai Responses API dan strict JSON schema
 - My Clips: All, Hot, Ready, Exported
 - Kliyu Studio: trim, rasio 9:16/1:1/16:9, captions, subtitle style, hook, font size, logo, dan watermark
-- Template library dan export MP4 melalui layanan FFmpeg
-- Campaign marketplace: discover, brief/assets, join, submission URL, brand review, verified views, earnings, dan payout request
-- Brand Dashboard untuk membuat campaign, mengelola budget, dan menyetujui submission
+- AI Caption: hook, caption, CTA, hashtag, dan copy sekali klik
+- Export MP4 melalui layanan FFmpeg
+- Published tracker untuk URL, views, likes, comments, shares, dan followers gained
+- Content Analytics untuk kategori, durasi, dan jam posting terbaik
+- Monetization dashboard untuk platform revenue, affiliate, produk digital, dan client
 - Cloudflare D1 untuk metadata dan R2 untuk source, logo, serta hasil render
 
 ## Menjalankan lokal

@@ -23,6 +23,7 @@ export const clips = sqliteTable("clips", {
   hookOverlay: integer("hook_overlay", { mode: "boolean" }).notNull().default(true), aspectRatio: text("aspect_ratio").notNull().default("9:16"),
   fontSize: integer("font_size").notNull().default(48), watermark: integer("watermark", { mode: "boolean" }).notNull().default(true),
   logoKey: text("logo_key"), status: text("status").notNull().default("ready"),
+  postCaption: text("post_caption"), postCta: text("post_cta"), postHashtags: text("post_hashtags").notNull().default("[]"),
   renderedKey: text("rendered_key"), createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
 });
 
@@ -46,7 +47,14 @@ export const postingRules = sqliteTable("posting_rules", {
 export const publications = sqliteTable("publications", {
   id: text("id").primaryKey(), userId: text("user_id").notNull(), clipId: text("clip_id").notNull(), platform: text("platform").notNull(),
   status: text("status").notNull().default("scheduled"), scheduledAt: integer("scheduled_at").notNull(), publishedAt: integer("published_at"),
-  externalUrl: text("external_url"), error: text("error"), views: integer("views").notNull().default(0), likes: integer("likes").notNull().default(0), createdAt: integer("created_at").notNull(),
+  externalUrl: text("external_url"), error: text("error"), views: integer("views").notNull().default(0), likes: integer("likes").notNull().default(0),
+  comments: integer("comments").notNull().default(0), shares: integer("shares").notNull().default(0), followersGained: integer("followers_gained").notNull().default(0),
+  createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
+});
+
+export const revenueEntries = sqliteTable("revenue_entries", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull(), source: text("source").notNull(), platform: text("platform"),
+  description: text("description").notNull(), amount: integer("amount").notNull(), earnedAt: integer("earned_at").notNull(), createdAt: integer("created_at").notNull(),
 });
 
 export const notifications = sqliteTable("notifications", {

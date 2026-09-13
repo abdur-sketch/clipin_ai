@@ -8,14 +8,15 @@ const source = (path) => readFile(new URL(path, root), "utf8");
 test("build contains the KLIYU MVP product", async () => {
   const [page, layout, worker] = await Promise.all([source("app/page.tsx"), source("app/layout.tsx"), source("dist/server/index.js")]);
   assert.match(layout, /KLIYU — Create Your Moment/);
-  for (const feature of ["Kliyu AI", "Kliyu Studio", "My Clips", "Templates", "Projects", "Create with Kliyu AI"]) assert.ok(page.includes(feature), `missing ${feature}`);
+  for (const feature of ["Dashboard", "Projects", "AI Clips", "Studio", "Published", "Analytics", "Monetization", "New project"]) assert.ok(page.includes(feature), `missing ${feature}`);
   assert.match(worker, /api\/projects/);
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape|Building your site/);
 });
 
 test("new project accepts original files and honest direct video links", async () => {
   const [page, projectsApi, processApi] = await Promise.all([source("app/page.tsx"), source("app/api/projects/route.ts"), source("app/api/projects/[id]/process/route.ts")]);
-  assert.match(page, /onStart: \(source\?: File \| string\)/);
+  assert.match(page, /onStart: \(source\?: File \| string,projectName\?:string\)/);
+  assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
   assert.match(page, /Link file video langsung/);
   assert.match(page, /MP4\/WebM publik/);
@@ -45,25 +46,25 @@ test("clip workflow includes filters, persistent Studio controls, render, and MP
   assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
 });
 
-test("templates, metadata, social card, and responsive styling are present", async () => {
+test("personal workspace metadata, social card, and responsive styling are present", async () => {
   const [page, css, layout] = await Promise.all([source("app/page.tsx"), source("app/globals.css"), source("app/layout.tsx")]);
-  for (const category of ["Podcast", "Talking Head", "Business", "Education", "Motivation", "Islamic", "Gaming"]) assert.ok(page.includes(category));
-  assert.match(css, /\.template-grid/);
+  assert.match(page, /PERSONAL CONTENT OS/);
+  assert.match(css, /\.content-os-page/);
   assert.match(css, /@media\(max-width:720px\)/);
   assert.match(css, /prefers-reduced-motion:reduce/);
-  assert.match(layout, /\/og\.png/);
-  await access(new URL("public/og.png", root));
+  assert.match(layout, /\/og-personal\.png/);
+  await access(new URL("public/og-personal.png", root));
 });
 
-test("Autopilot is excluded from the MVP navigation", async () => {
+test("SaaS and marketplace features are excluded from personal navigation", async () => {
   const page = await source("app/page.tsx");
   const nav = page.slice(page.indexOf('<nav className="nav-list"'), page.indexOf('</nav>', page.indexOf('<nav className="nav-list"')));
-  assert.doesNotMatch(nav, /Autopilot|Affiliate|Auto posting/);
+  assert.doesNotMatch(nav, /Autopilot|Affiliate|Auto posting|Campaigns|Templates|Upgrade|Billing/);
 });
 
 test("account settings and authenticated sign-out remain wired", async () => {
   const [page, account, capabilities, notifications] = await Promise.all([source("app/page.tsx"), source("app/api/account/route.ts"), source("app/api/capabilities/route.ts"), source("app/api/notifications/route.ts")]);
-  for (const feature of ["Upgrade Plan", "SettingsPage", "Billing & plan", "Sign out", "Save changes", "Settings-integrations".toLowerCase(), "HelpModal", "NotificationsModal", "scrollIntoView"]) assert.ok(page.toLowerCase().includes(feature.toLowerCase()));
+  for (const feature of ["SettingsPage", "Owner workspace", "Sign out", "Save changes", "Settings-integrations".toLowerCase(), "HelpModal", "NotificationsModal", "scrollIntoView"]) assert.ok(page.toLowerCase().includes(feature.toLowerCase()));
   assert.match(account, /user_settings/);
   assert.match(account, /subscriptions/);
   assert.match(capabilities, /OPENAI_API_KEY/);
@@ -71,10 +72,11 @@ test("account settings and authenticated sign-out remain wired", async () => {
   assert.match(notifications, /UPDATE notifications SET read=1/);
 });
 
-test("campaign marketplace supports brand creation, join, submissions, review, earnings, and payout", async()=>{
-  const [page,market,campaigns,join,submissions,review,wallet,migration]=await Promise.all([source("app/page.tsx"),source("app/marketplace.tsx"),source("app/api/campaigns/route.ts"),source("app/api/campaigns/[id]/join/route.ts"),source("app/api/submissions/route.ts"),source("app/api/submissions/[id]/route.ts"),source("app/api/wallet/route.ts"),source("drizzle/0005_wise_sharon_ventura.sql")]);
-  for(const feature of ["Campaigns","Marketplace"])assert.ok(page.includes(feature));
-  for(const feature of ["Discover","My Submissions","Earnings","Brand Dashboard","Join Campaign","Create with KLIYU AI","Submit for review","Request payout","Create campaign"])assert.ok(market.includes(feature),`missing ${feature}`);
-  assert.match(campaigns,/INSERT INTO campaigns/);assert.match(join,/campaign_participants/);assert.match(submissions,/campaign_submissions/);assert.match(review,/spent_budget=spent_budget/);assert.match(wallet,/Minimum payout Rp50\.000/);
-  for(const table of ["campaigns","campaign_participants","campaign_submissions","payout_requests"])assert.ok(migration.includes(`CREATE TABLE \`${table}\``));
+test("published content, analytics, monetization, and AI caption are fully wired", async()=>{
+  const [page,contentUi,contentApi,captionApi,migration]=await Promise.all([source("app/page.tsx"),source("app/content-os.tsx"),source("app/api/content/route.ts"),source("app/api/clips/[id]/caption/route.ts"),source("drizzle/0006_nosy_jean_grey.sql")]);
+  for(const feature of ["Published","Analytics","Monetization"])assert.ok(page.includes(feature));
+  for(const feature of ["Mark as Published","Update Performance","Content Analytics","Add Revenue","Revenue history"])assert.ok(contentUi.includes(feature),`missing ${feature}`);
+  assert.match(contentApi,/INSERT INTO publications/);assert.match(contentApi,/UPDATE publications SET views/);assert.match(contentApi,/INSERT INTO revenue_entries/);
+  assert.match(captionApi,/kliyu_social_caption/);assert.match(captionApi,/post_hashtags/);assert.match(page,/Generate Caption/);assert.match(page,/Copy Caption/);
+  assert.match(migration,/CREATE TABLE `revenue_entries`/);assert.match(migration,/post_caption/);assert.match(migration,/followers_gained/);
 });

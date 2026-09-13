@@ -8,14 +8,14 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   metadataBase: new URL("https://clipin-ai.baikganteng88.chatgpt.site"),
   title: "KLIYU — Create Your Moment",
-  description: "Turn long videos into short content worth sharing dengan Kliyu AI dan Kliyu Studio.",
+  description: "Personal content business OS untuk mengubah video panjang menjadi short clips, melacak performa, dan mencatat pendapatan.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
   openGraph: {
     title: "KLIYU — Create Your Moment",
-    description: "Turn long videos into short content worth sharing.",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "KLIYU — Create Your Moment" }],
+    description: "From long video to clips, performance insights, and revenue in one personal workspace.",
+    images: [{ url: "/og-personal.png", width: 1730, height: 909, alt: "KLIYU — Clip. Learn. Earn." }],
   },
-  twitter: { card: "summary_large_image", images: ["/og.png"] },
+  twitter: { card: "summary_large_image", images: ["/og-personal.png"] },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
