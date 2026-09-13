@@ -71,6 +71,18 @@ test("dummy dataset exposes hot, rendered, and editable clips", async () => {
   assert.match(page, /setStyle/);
 });
 
+test("detected clips supports preview, persistent edits, render all, and empty states", async () => {
+  const [page, renderApi] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/clips/[id]/render/route.ts", root), "utf8"),
+  ]);
+  for (const feature of ["ClipPreview", "renderAll", "renderingIds", "saveClip", "Tidak ada klip di filter ini", "Download caption", "downloadReport", "copySummary"]) assert.ok(page.includes(feature), `missing clips feature: ${feature}`);
+  assert.match(page, /fetch\(`\/api\/clips\/\$\{updated\.id\}`/);
+  assert.match(page, /setClipItems\(detail\.clips\.map/);
+  assert.match(renderApi, /status='rendered'/);
+  assert.match(renderApi, /mode: "preview"/);
+});
+
 test("autopilot covers monitoring, approval, posting, analytics, and affiliate", async () => {
   const [page, automation, schema, migration] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),

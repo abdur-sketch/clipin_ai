@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUpRight, Bell, Check, CheckCircle2,
-  CircleHelp, Clapperboard, Copy, Eye, FileVideo2, Flame, FolderKanban, Gauge, HomeIcon,
+  CircleHelp, Clapperboard, Copy, Download, Eye, FileVideo2, Flame, FolderKanban, Gauge, HomeIcon,
   Instagram, Link2, MoreHorizontal, Music2, Pause, Pencil, Play, Plus,
   Rocket, Settings, Share2, Sparkles, TrendingUp, UploadCloud, X, Youtube,
 } from "lucide-react";
 
 type View = "dashboard" | "projects" | "clips" | "autopilot" | "settings";
 type Clip = {
-  id: number; score: number; duration: number; title: string; hook: string;
-  caption: string; status: "ready" | "rendered"; accent: string;
+  id: number | string; score: number; duration: number; title: string; hook: string;
+  caption: string; status: "ready" | "rendering" | "rendered"; accent: string;
+  startTime?: number; endTime?: number; style?: string; faceTracking?: boolean; hookOverlay?: boolean;
 };
 
 const clips: Clip[] = [
@@ -27,6 +28,10 @@ export default function Home() {
   const [view, setView] = useState<View>("dashboard");
   const [filter, setFilter] = useState<"all" | "hot" | "rendered">("all");
   const [editor, setEditor] = useState<Clip | null>(null);
+  const [preview, setPreview] = useState<Clip | null>(null);
+  const [clipItems, setClipItems] = useState<Clip[]>(clips);
+  const [projectTitle, setProjectTitle] = useState("Podcast Bisnis: Mulai dari Nol");
+  const [renderingIds, setRenderingIds] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -42,11 +47,11 @@ export default function Home() {
 
   useEffect(()=>{fetch("/api/account").then(response=>response.ok?response.json():null).then(data=>{if(data?.subscription?.plan==="pro")setPlan(data.subscription.status==="trialing"?"Pro trial":"Pro plan")}).catch(()=>{})},[]);
 
-  const filtered = useMemo(() => clips.filter((clip) => {
+  const filtered = useMemo(() => clipItems.filter((clip) => {
     if (filter === "hot") return clip.score >= 85;
     if (filter === "rendered") return clip.status === "rendered";
     return true;
-  }), [filter]);
+  }), [filter, clipItems]);
 
   async function startUpload(source?: File | string) {
     setProgress(8); setProcessing(true);
@@ -63,10 +68,49 @@ export default function Home() {
       }
       const processed = await fetch(`/api/projects/${project.id}/process`, { method: "POST" });
       if (!processed.ok) throw new Error((await processed.json()).error || "Analisis gagal");
+      const detailResponse = await fetch(`/api/projects/${project.id}`);
+      if (detailResponse.ok) {
+        const detail = await detailResponse.json() as { project: Record<string, unknown>; clips: Record<string, unknown>[] };
+        const accents = ["lime", "cyan", "violet", "orange", "pink", "blue"];
+        setProjectTitle(String(detail.project.title || title));
+        setClipItems(detail.clips.map((item, index) => ({ id: String(item.id), score: Number(item.score), duration: Math.max(1, Math.round(Number(item.end_time) - Number(item.start_time))), title: String(item.title), hook: String(item.hook), caption: String(item.caption), status: String(item.status) as Clip["status"], accent: accents[index % accents.length], startTime: Number(item.start_time), endTime: Number(item.end_time), style: String(item.style || "bold"), faceTracking: Boolean(item.face_tracking), hookOverlay: Boolean(item.hook_overlay) })));
+      }
       setProgress(100); window.setTimeout(() => { setProcessing(false); setUploadOpen(false); setView("clips"); setToast("Analisis selesai — 6 klip terbaik ditemukan dan disimpan"); }, 500);
     } catch (error) { setProcessing(false); setToast(error instanceof Error ? error.message : "Terjadi kesalahan"); }
   }
   function go(next: View) { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  async function renderClip(clip: Clip) {
+    if (clip.status === "rendered" || renderingIds.includes(String(clip.id))) return;
+    setRenderingIds((items) => [...items, String(clip.id)]);
+    setClipItems((items) => items.map((item) => item.id === clip.id ? { ...item, status: "rendering" } : item));
+    try {
+      if (typeof clip.id === "string") {
+        const response = await fetch(`/api/clips/${clip.id}/render`, { method: "POST" });
+        if (!response.ok) throw new Error((await response.json()).error || "Render gagal");
+      } else await new Promise((resolve) => window.setTimeout(resolve, 450));
+      setClipItems((items) => items.map((item) => item.id === clip.id ? { ...item, status: "rendered" } : item));
+      setToast(`CLIP #${String(clip.id).slice(-2).padStart(2, "0")} selesai dirender`);
+    } catch (error) {
+      setClipItems((items) => items.map((item) => item.id === clip.id ? { ...item, status: "ready" } : item));
+      setToast(error instanceof Error ? error.message : "Render gagal");
+    } finally { setRenderingIds((items) => items.filter((id) => id !== String(clip.id))); }
+  }
+  async function renderAll() {
+    const pending = clipItems.filter((clip) => clip.status !== "rendered");
+    if (!pending.length) { setToast("Semua klip sudah selesai dirender"); return; }
+    setToast(`${pending.length} klip masuk antrean render`);
+    await Promise.all(pending.map(renderClip));
+  }
+  async function saveClip(updated: Clip) {
+    try {
+      if (typeof updated.id === "string") {
+        const response = await fetch(`/api/clips/${updated.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: updated.title, hook: updated.hook, caption: updated.caption, startTime: updated.startTime ?? 0, endTime: updated.endTime ?? updated.duration, style: updated.style ?? "bold", faceTracking: updated.faceTracking ?? true, hookOverlay: updated.hookOverlay ?? true }) });
+        if (!response.ok) throw new Error((await response.json()).error || "Gagal menyimpan klip");
+      }
+      setClipItems((items) => items.map((clip) => clip.id === updated.id ? updated : clip));
+      setEditor(null); setToast("Perubahan klip berhasil disimpan");
+    } catch (error) { setToast(error instanceof Error ? error.message : "Gagal menyimpan klip"); }
+  }
 
   return (
     <main className="app-shell">
@@ -93,7 +137,7 @@ export default function Home() {
           <div className="top-actions"><button className="icon-button" aria-label="Bantuan" onClick={() => setToast("Pusat bantuan segera tersedia")}><CircleHelp /></button><button className="icon-button notification" aria-label="Notifikasi" onClick={() => setToast("Tidak ada notifikasi baru")}><Bell /></button><button className="primary small" onClick={() => setUploadOpen(true)}><Plus /> New project</button></div>
         </header>
         {view === "dashboard" && <Dashboard onUpload={() => setUploadOpen(true)} onClips={() => go("clips")} onProjects={() => go("projects")} />}
-        {view === "clips" && <ClipsPage filter={filter} setFilter={setFilter} filtered={filtered} onBack={() => go("projects")} onNotice={setToast} onEdit={setEditor} onRender={(clip) => setToast(`CLIP #${String(clip.id).padStart(2, "0")} masuk antrean render`)} />}
+        {view === "clips" && <ClipsPage projectTitle={projectTitle} items={clipItems} filter={filter} setFilter={setFilter} filtered={filtered} onBack={() => go("projects")} onNotice={setToast} onEdit={setEditor} onPreview={setPreview} onRender={renderClip} onRenderAll={renderAll} renderingIds={renderingIds} />}
         {view === "projects" && <ProjectsPage onOpen={() => go("clips")} onUpload={() => setUploadOpen(true)} />}
         {view === "autopilot" && <AutopilotPage notify={setToast} />}
         {view === "settings" && <SettingsPage notify={setToast} onUpgrade={()=>setUpgradeOpen(true)} plan={plan} />}
@@ -101,7 +145,8 @@ export default function Home() {
 
       <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span><HomeIcon /></span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span><Play /></span>Clips</button><button className="mobile-create" aria-label="Buat project baru" onClick={() => setUploadOpen(true)}><Plus /></button><button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span><FolderKanban /></span>Projects</button><button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span><Rocket /></span>Auto</button><button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><span><Settings /></span>Settings</button></nav>
       {uploadOpen && <UploadModal processing={processing} progress={progress} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
-      {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={() => { setEditor(null); setToast("Perubahan klip berhasil disimpan"); }} />}
+      {preview && <ClipPreview clip={preview} onClose={() => setPreview(null)} onEdit={() => { setPreview(null); setEditor(preview); }} />}
+      {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={saveClip} />}
       {upgradeOpen&&<UpgradeModal plan={plan} onClose={()=>setUpgradeOpen(false)} onUpgraded={()=>{setPlan("Pro trial");setUpgradeOpen(false);setToast("Trial Pro 7 hari berhasil diaktifkan")}}/>}
       {toast && <div className="toast"><span><CheckCircle2 /></span>{toast}</div>}
     </main>
@@ -120,17 +165,33 @@ function Dashboard({ onUpload, onClips, onProjects }: { onUpload: () => void; on
   </div>;
 }
 
-function ClipsPage({ filter, setFilter, filtered, onBack, onNotice, onEdit, onRender }: { filter: "all" | "hot" | "rendered"; setFilter: (v: "all" | "hot" | "rendered") => void; filtered: Clip[]; onBack: () => void; onNotice: (message: string) => void; onEdit: (c: Clip) => void; onRender: (c: Clip) => void }) {
+function ClipsPage({ projectTitle, items, filter, setFilter, filtered, onBack, onNotice, onEdit, onPreview, onRender, onRenderAll, renderingIds }: { projectTitle: string; items: Clip[]; filter: "all" | "hot" | "rendered"; setFilter: (v: "all" | "hot" | "rendered") => void; filtered: Clip[]; onBack: () => void; onNotice: (message: string) => void; onEdit: (c: Clip) => void; onPreview: (c: Clip) => void; onRender: (c: Clip) => void; onRenderAll: () => void; renderingIds: string[] }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hotCount = items.filter((clip) => clip.score >= 85).length;
+  const renderedCount = items.filter((clip) => clip.status === "rendered").length;
+  const topScore = Math.max(0, ...items.map((clip) => clip.score));
+  function downloadReport() {
+    const report = [`CLIPIN AI — ${projectTitle}`, `${items.length} clips · ${hotCount} hot · ${renderedCount} rendered`, "", ...items.map((clip, index) => `${index + 1}. ${clip.title} (${clip.score}/100)\n${clip.hook}`)].join("\n");
+    const url = URL.createObjectURL(new Blob([report], { type: "text/plain" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${projectTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "clipin-project"}-report.txt`; anchor.click(); URL.revokeObjectURL(url); setMenuOpen(false); onNotice("Laporan analisis berhasil diunduh");
+  }
+  async function copySummary() {
+    await navigator.clipboard.writeText(`${projectTitle}: ${items.length} clips, ${hotCount} hot clips, top score ${topScore}.`); setMenuOpen(false); onNotice("Ringkasan project berhasil disalin");
+  }
   return <div className="page clips-page">
-    <div className="project-heading"><div><button className="back-link" onClick={onBack}><ArrowLeft /> Projects</button><div className="title-line"><h1>Podcast Bisnis: Mulai dari Nol</h1><span>Complete</span></div><p>35:42 · Bahasa Indonesia · Diproses 2 jam lalu</p></div><button className="outline-button" aria-label="Menu project" onClick={() => onNotice("Menu project segera tersedia")}><MoreHorizontal /></button></div>
-    <div className="result-summary"><div className="radial-score"><strong>92</strong><span>TOP SCORE</span></div><div><span className="eyebrow"><i /> ANALYSIS COMPLETE</span><h2>14 momen menarik ditemukan.</h2><p>AI memilih bagian terbaik berdasarkan hook, konteks, dan kekuatan insight.</p></div><div className="summary-metrics"><div><strong>14</strong><span>Found</span></div><div><strong>3</strong><span><Flame /> Hot</span></div><div><strong>10</strong><span>Rendered</span></div></div></div>
-    <div className="clip-toolbar"><div><h2>Detected clips</h2><span>{filtered.length} results</span></div><div className="filter-tabs"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All <span>14</span></button><button className={filter === "hot" ? "active" : ""} onClick={() => setFilter("hot")}><Flame /> Hot <span>3</span></button><button className={filter === "rendered" ? "active" : ""} onClick={() => setFilter("rendered")}><Check /> Rendered <span>10</span></button></div><button className="primary" onClick={() => onRender(clips[0])}>Render all <ArrowRight /></button></div>
-    <div className="clips-grid">{filtered.map((clip) => <ClipCard key={clip.id} clip={clip} onEdit={() => onEdit(clip)} onRender={() => onRender(clip)} />)}</div>
+    <div className="project-heading"><div><button className="back-link" onClick={onBack}><ArrowLeft /> Projects</button><div className="title-line"><h1>{projectTitle}</h1><span>Complete</span></div><p>{items.reduce((total, clip) => total + clip.duration, 0)} detik pilihan · Bahasa Indonesia · Analisis selesai</p></div><div className="project-menu-wrap"><button className="outline-button" aria-label="Menu project" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal /></button>{menuOpen && <div className="project-action-menu"><button onClick={copySummary}><Copy /> Salin ringkasan</button><button onClick={downloadReport}><Download /> Unduh laporan</button></div>}</div></div>
+    <div className="result-summary"><div className="radial-score"><strong>{topScore}</strong><span>TOP SCORE</span></div><div><span className="eyebrow"><i /> ANALYSIS COMPLETE</span><h2>{items.length} momen menarik ditemukan.</h2><p>AI memilih bagian terbaik berdasarkan hook, konteks, dan kekuatan insight.</p></div><div className="summary-metrics"><div><strong>{items.length}</strong><span>Found</span></div><div><strong>{hotCount}</strong><span><Flame /> Hot</span></div><div><strong>{renderedCount}</strong><span>Rendered</span></div></div></div>
+    <div className="clip-toolbar"><div><h2>Detected clips</h2><span>{filtered.length} results</span></div><div className="filter-tabs"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All <span>{items.length}</span></button><button className={filter === "hot" ? "active" : ""} onClick={() => setFilter("hot")}><Flame /> Hot <span>{hotCount}</span></button><button className={filter === "rendered" ? "active" : ""} onClick={() => setFilter("rendered")}><Check /> Rendered <span>{renderedCount}</span></button></div><button className="primary" disabled={renderingIds.length > 0 || renderedCount === items.length} onClick={onRenderAll}>{renderingIds.length ? `Rendering ${renderingIds.length}...` : renderedCount === items.length ? "All rendered" : "Render all"} <ArrowRight /></button></div>
+    {filtered.length ? <div className="clips-grid">{filtered.map((clip) => <ClipCard key={clip.id} clip={clip} onEdit={() => onEdit(clip)} onPreview={() => onPreview(clip)} onRender={() => onRender(clip)} rendering={renderingIds.includes(String(clip.id))} />)}</div> : <div className="clips-empty"><Clapperboard /><h3>Tidak ada klip di filter ini</h3><p>Coba pilih filter lain untuk melihat hasil analisis.</p><button onClick={() => setFilter("all")}>Tampilkan semua klip</button></div>}
   </div>;
 }
 
-function ClipCard({ clip, onEdit, onRender }: { clip: Clip; onEdit: () => void; onRender: () => void }) {
-  return <article className="clip-card"><div className={`clip-preview ${clip.accent}`}><div className="vertical-video"><div className="mini-person"><i /><b /></div><div className="subtitle-preview">JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div></div><div className="clip-score"><span><Flame /></span><strong>{clip.score}</strong><small>HOT SCORE</small></div><span className="clip-duration">00:{clip.duration}</span><button className="play-button" onClick={onEdit} aria-label={`Preview ${clip.title}`}><Play /></button></div><div className="clip-body"><div className="clip-kicker"><span>CLIP #{String(clip.id).padStart(2, "0")}</span><span>{clip.duration} sec · 9:16</span></div><h3>{clip.title}</h3><p>“{clip.hook}”</p><div className="clip-actions"><button onClick={onEdit}><Pencil /> Edit</button><button onClick={onEdit}><Eye /> Preview</button><button className="render-button" onClick={onRender}>{clip.status === "rendered" ? <><Check /> Rendered</> : <>Render <ArrowRight /></>}</button></div></div></article>;
+function ClipCard({ clip, onEdit, onPreview, onRender, rendering }: { clip: Clip; onEdit: () => void; onPreview: () => void; onRender: () => void; rendering: boolean }) {
+  return <article className="clip-card"><div className={`clip-preview ${clip.accent}`}><div className="vertical-video"><div className="mini-person"><i /><b /></div><div className="subtitle-preview">JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div></div><div className="clip-score"><span><Flame /></span><strong>{clip.score}</strong><small>HOT SCORE</small></div><span className="clip-duration">00:{String(clip.duration).padStart(2, "0")}</span><button className="play-button" onClick={onPreview} aria-label={`Preview ${clip.title}`}><Play /></button></div><div className="clip-body"><div className="clip-kicker"><span>CLIP #{String(clip.id).slice(-2).padStart(2, "0")}</span><span>{clip.duration} sec · 9:16</span></div><h3>{clip.title}</h3><p>“{clip.hook}”</p><div className="clip-actions"><button onClick={onEdit}><Pencil /> Edit</button><button onClick={onPreview}><Eye /> Preview</button><button className={`render-button ${rendering ? "is-rendering" : ""}`} disabled={rendering || clip.status === "rendered"} onClick={onRender}>{rendering || clip.status === "rendering" ? <>Rendering…</> : clip.status === "rendered" ? <><Check /> Rendered</> : <>Render <ArrowRight /></>}</button></div></div></article>;
+}
+
+function ClipPreview({ clip, onClose, onEdit }: { clip: Clip; onClose: () => void; onEdit: () => void }) {
+  const [playing, setPlaying] = useState(true);
+  return <div className="modal-backdrop preview-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="clip-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${clip.title}`}><button className="close-button" aria-label="Tutup preview" onClick={onClose}><X /></button><div className={`preview-stage ${clip.accent}`}><div className="phone-preview"><div className="editor-person"><i /><b /></div><span className="hook-overlay">{clip.hook}</span><div className="editor-subtitle bold">JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div><button aria-label={playing ? "Pause preview" : "Play preview"} onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button></div></div><div className="preview-details"><span className="modal-kicker">CLIP PREVIEW</span><h2>{clip.title}</h2><p>{clip.caption}</p><div className="preview-stats"><span><Flame /> <b>{clip.score}</b> Hot score</span><span>{clip.duration} detik</span><span>9:16</span></div><div className="preview-actions"><button onClick={onEdit}><Pencil /> Edit clip</button><button className="primary" onClick={() => { const blob = new Blob([clip.caption], { type: "text/plain" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `clip-${String(clip.id)}-caption.txt`; anchor.click(); URL.revokeObjectURL(url); }}><Download /> Download caption</button></div></div></section></div>;
 }
 
 function ProjectsPage({ onOpen, onUpload }: { onOpen: () => void; onUpload: () => void }) {
@@ -219,10 +280,11 @@ function UploadModal({ processing, progress, onClose, onStart, inputRef }: { pro
   </div>;
 }
 
-function ClipEditor({ clip, onClose, onSave }: { clip: Clip; onClose: () => void; onSave: () => void }) {
-  const [subtitle, setSubtitle] = useState(true); const [tracking, setTracking] = useState(true); const [hook, setHook] = useState(true); const [style, setStyle] = useState("Bold");
+function ClipEditor({ clip, onClose, onSave }: { clip: Clip; onClose: () => void; onSave: (clip: Clip) => void }) {
+  const [title, setTitle] = useState(clip.title); const [hookText, setHookText] = useState(clip.hook);
+  const [subtitle, setSubtitle] = useState(true); const [tracking, setTracking] = useState(clip.faceTracking ?? true); const [hook, setHook] = useState(clip.hookOverlay ?? true); const [style, setStyle] = useState(clip.style ? clip.style[0].toUpperCase() + clip.style.slice(1) : "Bold");
   const [playing, setPlaying] = useState(false);
-  return <div className="modal-backdrop editor-backdrop"><section className="editor-modal" role="dialog" aria-modal="true"><header><div><span>CLIP #{String(clip.id).padStart(2, "0")}</span><h2>Edit clip</h2></div><button aria-label="Tutup editor" onClick={onClose}><X /></button></header><div className="editor-layout"><div className="editor-preview"><div className="phone-preview"><div className="editor-person"><i /><b /></div>{hook && <span className="hook-overlay">{clip.hook}</span>}{subtitle && <div className={`editor-subtitle ${style.toLowerCase()}`}>JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div>}<button aria-label={playing ? "Pause preview" : "Play preview"} onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button></div><div className="timeline"><span>00:12:14</span><div><i /><b /><i /></div><span>00:12:48</span></div></div><div className="editor-controls"><label>Judul clip<input defaultValue={clip.title} /></label><label>Hook overlay<textarea defaultValue={clip.hook} /></label><div className="time-fields"><label>Start<input defaultValue="00:12:14" /></label><label>End<input defaultValue="00:12:48" /></label></div><div className="toggle-list"><Toggle label="Burn subtitles" value={subtitle} setValue={setSubtitle} /><Toggle label="Face tracking" value={tracking} setValue={setTracking} /><Toggle label="Hook overlay" value={hook} setValue={setHook} /></div><label>Caption style<div className="style-options">{["Clean", "Bold", "Karaoke"].map((name) => <button key={name} className={style === name ? "active" : ""} onClick={() => setStyle(name)}>{name}</button>)}</div></label><div className="editor-actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={onSave}>Save changes</button></div></div></div></section></div>;
+  return <div className="modal-backdrop editor-backdrop"><section className="editor-modal" role="dialog" aria-modal="true"><header><div><span>CLIP #{String(clip.id).slice(-2).padStart(2, "0")}</span><h2>Edit clip</h2></div><button aria-label="Tutup editor" onClick={onClose}><X /></button></header><div className="editor-layout"><div className="editor-preview"><div className="phone-preview"><div className="editor-person"><i /><b /></div>{hook && <span className="hook-overlay">{hookText}</span>}{subtitle && <div className={`editor-subtitle ${style.toLowerCase()}`}>JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div>}<button aria-label={playing ? "Pause preview" : "Play preview"} onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button></div><div className="timeline"><span>{Math.round(clip.startTime ?? 0)}s</span><div><i /><b /><i /></div><span>{Math.round(clip.endTime ?? clip.duration)}s</span></div></div><div className="editor-controls"><label>Judul clip<input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Hook overlay<textarea value={hookText} onChange={(event) => setHookText(event.target.value)} /></label><div className="time-fields"><label>Start<input type="number" min="0" defaultValue={clip.startTime ?? 0} /></label><label>End<input type="number" min="1" defaultValue={clip.endTime ?? clip.duration} /></label></div><div className="toggle-list"><Toggle label="Burn subtitles" value={subtitle} setValue={setSubtitle} /><Toggle label="Face tracking" value={tracking} setValue={setTracking} /><Toggle label="Hook overlay" value={hook} setValue={setHook} /></div><label>Caption style<div className="style-options">{["Clean", "Bold", "Karaoke"].map((name) => <button key={name} className={style === name ? "active" : ""} onClick={() => setStyle(name)}>{name}</button>)}</div></label><div className="editor-actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={!title.trim() || !hookText.trim()} onClick={() => onSave({ ...clip, title: title.trim(), hook: hookText.trim(), style: style.toLowerCase(), faceTracking: tracking, hookOverlay: hook })}>Save changes</button></div></div></div></section></div>;
 }
 
 function Toggle({ label, value, setValue }: { label: string; value: boolean; setValue: (v: boolean) => void }) { return <button className="toggle-row" onClick={() => setValue(!value)}><span>{label}</span><i className={value ? "on" : ""}><b /></i></button>; }
