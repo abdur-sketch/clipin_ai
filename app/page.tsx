@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "dashboard" | "projects" | "clips";
+type View = "dashboard" | "projects" | "clips" | "autopilot";
 type Clip = {
   id: number; score: number; duration: number; title: string; hook: string;
   caption: string; status: "ready" | "rendered"; accent: string;
@@ -39,11 +39,12 @@ export default function Home() {
     return true;
   }), [filter]);
 
-  async function startUpload(file?: File) {
+  async function startUpload(source?: File | string) {
     setProgress(8); setProcessing(true);
     try {
-      const title = file?.name.replace(/\.[^.]+$/, "") || "Podcast Bisnis: Mulai dari Nol";
-      const created = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, filename: file?.name, contentType: file?.type }) });
+      const file = source instanceof File ? source : undefined; const sourceUrl = typeof source === "string" ? source : undefined;
+      const title = file?.name.replace(/\.[^.]+$/, "") || (sourceUrl ? "Video YouTube Baru" : "Podcast Bisnis: Mulai dari Nol");
+      const created = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, filename: file?.name, contentType: file?.type, sourceUrl }) });
       if (!created.ok) throw new Error((await created.json()).error || "Gagal membuat project");
       const { project } = await created.json() as { project: { id: string } }; setProgress(22);
       if (file) {
@@ -66,6 +67,7 @@ export default function Home() {
           <button onClick={() => setUploadOpen(true)}><span>＋</span>New Project</button>
           <button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span>▶</span>My Clips <b>24</b></button>
           <button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span>▣</span>Projects</button>
+          <button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span>✦</span>Autopilot <b>NEW</b></button>
         </nav>
         <div className="sidebar-bottom">
           <div className="usage-card"><div className="usage-icon">✦</div><strong>8 dari 15 menit</strong><span>Terpakai bulan ini</span><div className="usage-bar"><i /></div><button onClick={() => setToast("Paket Pro segera tersedia")}>Upgrade Plan ↗</button></div>
@@ -77,15 +79,16 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-brand" onClick={() => go("dashboard")}><span className="brand-mark">C</span>CLIPIN.</button>
-          <div className="breadcrumbs">Workspace <span>/</span> {view === "dashboard" ? "Dashboard" : view === "clips" ? "Detected Clips" : "Projects"}</div>
+          <div className="breadcrumbs">Workspace <span>/</span> {view === "dashboard" ? "Dashboard" : view === "clips" ? "Detected Clips" : view === "autopilot" ? "Autopilot" : "Projects"}</div>
           <div className="top-actions"><button className="icon-button" aria-label="Bantuan" onClick={() => setToast("Pusat bantuan segera tersedia")}>?</button><button className="icon-button notification" aria-label="Notifikasi" onClick={() => setToast("Tidak ada notifikasi baru")}>♢</button><button className="primary small" onClick={() => setUploadOpen(true)}>＋ New project</button></div>
         </header>
         {view === "dashboard" && <Dashboard onUpload={() => setUploadOpen(true)} onClips={() => go("clips")} onProjects={() => go("projects")} />}
         {view === "clips" && <ClipsPage filter={filter} setFilter={setFilter} filtered={filtered} onBack={() => go("projects")} onNotice={setToast} onEdit={setEditor} onRender={(clip) => setToast(`CLIP #${String(clip.id).padStart(2, "0")} masuk antrean render`)} />}
         {view === "projects" && <ProjectsPage onOpen={() => go("clips")} onUpload={() => setUploadOpen(true)} />}
+        {view === "autopilot" && <AutopilotPage notify={setToast} />}
       </section>
 
-      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span>⌂</span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span>▶</span>Clips</button><button className="mobile-create" onClick={() => setUploadOpen(true)}>＋</button><button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span>▣</span>Projects</button><button onClick={() => setToast("Pengaturan segera tersedia")}><span>⚙</span>Settings</button></nav>
+      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span>⌂</span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span>▶</span>Clips</button><button className="mobile-create" onClick={() => setUploadOpen(true)}>＋</button><button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span>▣</span>Projects</button><button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span>✦</span>Autopilot</button></nav>
       {uploadOpen && <UploadModal processing={processing} progress={progress} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
       {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={() => { setEditor(null); setToast("Perubahan klip berhasil disimpan"); }} />}
       {toast && <div className="toast"><span>✓</span>{toast}</div>}
@@ -121,6 +124,27 @@ function ClipCard({ clip, onEdit, onRender }: { clip: Clip; onEdit: () => void; 
 function ProjectsPage({ onOpen, onUpload }: { onOpen: () => void; onUpload: () => void }) {
   const rows = [["Podcast Bisnis: Mulai dari Nol", "35:42", "Complete", "14 clips", "2 jam lalu"], ["Tips Karier untuk Fresh Graduate", "18:09", "Complete", "6 clips", "Kemarin"], ["Cara Bangun Personal Branding", "28:17", "Draft", "4 clips", "3 hari lalu"]];
   return <div className="page projects-page"><div className="simple-heading"><div><span className="eyebrow"><i /> YOUR LIBRARY</span><h1>Semua project</h1><p>Kelola video panjang dan semua klip yang sudah dihasilkan.</p></div><button className="primary" onClick={onUpload}>＋ New project</button></div><div className="table-card"><div className="table-row table-head"><span>PROJECT</span><span>STATUS</span><span>CLIPS</span><span>CREATED</span><span /></div>{rows.map((item, index) => <button className="table-row" key={item[0]} onClick={onOpen}><span className="project-cell"><i className={`table-thumb thumb-${index + 1}`} /><span><strong>{item[0]}</strong><small>{item[1]} · Indonesian</small></span></span><span><b className={`table-status ${item[2].toLowerCase()}`}>{item[2]}</b></span><span>{item[3]}</span><span>{item[4]}</span><span>→</span></button>)}</div></div>;
+}
+
+function AutopilotPage({ notify }: { notify: (message:string)=>void }) {
+  const [watch,setWatch]=useState(true),[mode,setMode]=useState<"approval"|"autopilot">("approval"),[score,setScore]=useState(85),[limit,setLimit]=useState(3);
+  const [platforms,setPlatforms]=useState(["Instagram","TikTok"]); const [channel,setChannel]=useState("https://youtube.com/@tuahkreasi"); const [videoUrl,setVideoUrl]=useState(""); const [saving,setSaving]=useState(false);
+  async function action(payload:Record<string,unknown>,success:string){setSaving(true);try{const response=await fetch("/api/automation",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});if(!response.ok)throw new Error((await response.json()).error);notify(success)}catch(error){notify(error instanceof Error?error.message:"Gagal menyimpan")}finally{setSaving(false)}}
+  function togglePlatform(name:string){setPlatforms(value=>value.includes(name)?value.filter(x=>x!==name):[...value,name])}
+  async function importVideo(){if(!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(videoUrl)){notify("Masukkan URL video YouTube yang valid");return}setSaving(true);try{const created=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({title:"Video YouTube Baru",sourceUrl:videoUrl})});if(!created.ok)throw new Error("Gagal membuat project");const {project}=await created.json() as {project:{id:string}};await fetch(`/api/projects/${project.id}/process`,{method:"POST"});setVideoUrl("");notify("Video YouTube masuk antrean pemrosesan")}catch(error){notify(error instanceof Error?error.message:"Import gagal")}finally{setSaving(false)}}
+  return <div className="page autopilot-page">
+    <div className="simple-heading"><div><span className="eyebrow"><i/> CONTENT ON AUTOPILOT</span><h1>Mesin konten yang tetap jalan<br/>saat Anda <em>offline.</em></h1><p>Pantau channel, buat klip, minta approval, lalu posting otomatis.</p></div><span className="system-live">● SYSTEM ONLINE</span></div>
+    <div className="automation-flow"><span>VIDEO BARU</span><i>→</i><span>DETEKSI</span><i>→</i><span>BIKIN KLIP</span><i>→</i><span>APPROVAL</span><i>→</i><span>POSTING</span></div>
+    <div className="autopilot-grid">
+      <section className="auto-card url-card"><div className="card-head"><div><small>QUICK IMPORT</small><h2>Tempel link video panjang</h2></div><span>YOUTUBE</span></div><div className="big-url-input"><input value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..."/><button disabled={saving} onClick={importVideo}>Bikin klip →</button></div><p>Judul, thumbnail, dan durasi akan diambil otomatis ketika YouTube API terhubung.</p></section>
+      <section className="auto-card channel-card"><div className="card-head"><div><small>SOURCE 01</small><h2>Channel Watch</h2></div><Toggle label="" value={watch} setValue={(v)=>{setWatch(v);action({action:"toggle-watch",id:"primary",enabled:v},v?"Channel Watch aktif":"Channel Watch dijeda")}}/></div><div className="channel-box"><b className="youtube-mark">▶</b><div><strong>TUAH KREASI</strong><span>Dipantau setiap 15 menit</span></div><em>CONNECTED</em></div><label className="channel-input"><span>Tambah channel YouTube</span><div><input value={channel} onChange={e=>setChannel(e.target.value)}/><button disabled={saving} onClick={()=>action({action:"connect-channel",url:channel,name:"TUAH KREASI"},"Channel berhasil dihubungkan")}>Connect →</button></div></label><div className="detected-video"><i className="video-dot"/><div><small>VIDEO BARU TERDETEKSI</small><strong>KEJAR SETORAN — ENZY STORIA</strong><span>7 clips dibuat · 3 menunggu approval</span></div><button onClick={()=>notify("Membuka approval queue")}>Review</button></div></section>
+      <section className="auto-card rules-card"><div className="card-head"><div><small>POSTING RULES</small><h2>Autopilot rules</h2></div><span>WIB</span></div><div className="mode-switch"><button className={mode==="approval"?"active":""} onClick={()=>setMode("approval")}>Approval dulu</button><button className={mode==="autopilot"?"active":""} onClick={()=>setMode("autopilot")}>Full autopilot</button></div><label>Minimal Hot Score <b>{score}</b><input type="range" min="60" max="100" value={score} onChange={e=>setScore(Number(e.target.value))}/></label><label>Maksimal posting per hari <select value={limit} onChange={e=>setLimit(Number(e.target.value))}><option>1</option><option>2</option><option>3</option><option>5</option></select></label><label>Jam posting <div className="time-chips"><span>12:00</span><span>19:00</span><button onClick={()=>notify("Slot waktu baru ditambahkan")}>＋</button></div></label><button className="primary save-rules" disabled={saving} onClick={()=>action({action:"save-rules",mode,minScore:score,dailyLimit:limit,postingTimes:["12:00","19:00"],platforms:platforms.map(x=>x.toLowerCase())},"Aturan autopilot tersimpan")}>Save rules</button></section>
+      <section className="auto-card platform-card"><div className="card-head"><div><small>DISTRIBUTION</small><h2>Auto posting</h2></div><span>{platforms.length}/4 aktif</span></div><div className="platform-list">{[["TikTok","♪"],["Instagram","◎"],["Facebook","f"],["YouTube Shorts","▶"]].map(([name,icon])=><button key={name} onClick={()=>togglePlatform(name)}><b>{icon}</b><span><strong>{name}</strong><small>{platforms.includes(name)?"Siap posting":"Hubungkan akun"}</small></span><i className={platforms.includes(name)?"connected":""}>{platforms.includes(name)?"✓":"＋"}</i></button>)}</div></section>
+      <section className="auto-card approval-card"><div className="card-head"><div><small>APPROVAL QUEUE</small><h2>3 clips menunggu</h2></div><button onClick={()=>notify("Semua klip disetujui dan dijadwalkan")}>Approve all</button></div>{clips.slice(0,3).map((clip,index)=><div className="approval-row" key={clip.id}><span className={`approval-thumb ${clip.accent}`}>▶</span><div><strong>{clip.title}</strong><small>🔥 {clip.score} · {clip.duration} detik</small></div><button onClick={()=>notify(`Clip #${clip.id} ditolak`)}>×</button><button className="approve" onClick={()=>notify(`Clip #${clip.id} disetujui`)}>✓</button>{index===0&&<em>12:00</em>}</div>)}</section>
+      <section className="auto-card analytics-card"><div className="card-head"><div><small>LAST 30 DAYS</small><h2>Performance</h2></div><button onClick={()=>notify("Laporan CSV sedang disiapkan")}>Export ↗</button></div><div className="metric-strip"><div><strong>248K</strong><span>Views</span></div><div><strong>18.2K</strong><span>Likes</span></div><div><strong>7.3%</strong><span>Engagement</span></div></div><div className="chart-bars">{[35,48,42,68,55,78,92,74,88,96,81,100].map((h,i)=><i key={i} style={{height:`${h}%`}}/>)}</div><p>↑ 32% dibanding 30 hari sebelumnya</p></section>
+      <section className="auto-card affiliate-card"><div className="card-head"><div><small>CREATOR PARTNER</small><h2>Affiliate</h2></div><span>20% komisi</span></div><div className="affiliate-value"><strong>Rp1.240.000</strong><span>Komisi tersedia</span></div><div className="affiliate-stats"><span><b>184</b> Klik</span><span><b>23</b> Signup</span><span><b>8</b> Transaksi</span></div><button className="referral-button" onClick={()=>action({action:"create-referral"},"Link referral berhasil disalin")}>clipin.ai/ref/CLIPIN8A2F <b>Copy</b></button></section>
+    </div>
+  </div>
 }
 
 function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (file?: File) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {

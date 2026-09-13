@@ -57,3 +57,16 @@ test("dummy dataset exposes hot, rendered, and editable clips", async () => {
   assert.match(page, /setHook/);
   assert.match(page, /setStyle/);
 });
+
+test("autopilot covers monitoring, approval, posting, analytics, and affiliate", async () => {
+  const [page, automation, schema, migration] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/automation/route.ts", root), "utf8"),
+    readFile(new URL("db/schema.ts", root), "utf8"),
+    readFile(new URL("drizzle/0001_large_martin_li.sql", root), "utf8"),
+  ]);
+  for (const feature of ["Channel Watch","Full autopilot","Approval queue","Auto posting","Performance","Affiliate","save-rules","connect-channel"]) assert.ok((page+automation).toLowerCase().includes(feature.toLowerCase()),`missing ${feature}`);
+  for (const table of ["channels","postingRules","publications","notifications","referrals"]) assert.match(schema,new RegExp(table));
+  assert.match(migration,/CREATE TABLE `channels`/);
+  assert.match(migration,/CREATE TABLE `publications`/);
+});
