@@ -62,8 +62,11 @@ test("Autopilot is excluded from the MVP navigation", async () => {
 });
 
 test("account settings and authenticated sign-out remain wired", async () => {
-  const [page, account] = await Promise.all([source("app/page.tsx"), source("app/api/account/route.ts")]);
-  for (const feature of ["Upgrade Plan", "SettingsPage", "Billing & plan", "Sign out", "Save changes"]) assert.ok(page.includes(feature));
+  const [page, account, capabilities, notifications] = await Promise.all([source("app/page.tsx"), source("app/api/account/route.ts"), source("app/api/capabilities/route.ts"), source("app/api/notifications/route.ts")]);
+  for (const feature of ["Upgrade Plan", "SettingsPage", "Billing & plan", "Sign out", "Save changes", "Settings-integrations".toLowerCase(), "HelpModal", "NotificationsModal", "scrollIntoView"]) assert.ok(page.toLowerCase().includes(feature.toLowerCase()));
   assert.match(account, /user_settings/);
   assert.match(account, /subscriptions/);
+  assert.match(capabilities, /OPENAI_API_KEY/);
+  assert.match(capabilities, /RENDER_SERVICE_URL/);
+  assert.match(notifications, /UPDATE notifications SET read=1/);
 });

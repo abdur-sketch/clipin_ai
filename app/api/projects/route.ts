@@ -20,6 +20,8 @@ export async function POST(request: Request) {
     } catch { return jsonError("Link video tidak valid"); }
   }
   const projectId = id("prj"), now = Date.now();
-  await bindings.DB.prepare("INSERT INTO projects (id,user_id,title,filename,content_type,source_url,source_type,status,progress,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'draft',0,?,?)").bind(projectId,user.id,body.title.trim(),body.filename ?? null,body.contentType ?? null,sourceUrl,sourceType,now,now).run();
+  const defaults = await bindings.DB.prepare("SELECT language FROM user_settings WHERE user_id=?").bind(user.id).first<{language?:string}>();
+  const language = ["id","en","auto"].includes(String(defaults?.language)) ? String(defaults?.language) : "id";
+  await bindings.DB.prepare("INSERT INTO projects (id,user_id,title,filename,content_type,source_url,source_type,language,status,progress,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'draft',0,?,?)").bind(projectId,user.id,body.title.trim(),body.filename ?? null,body.contentType ?? null,sourceUrl,sourceType,language,now,now).run();
   return Response.json({ project: { id: projectId, title: body.title.trim(), sourceType, sourceUrl, status: "draft", progress: 0, createdAt: now } }, { status: 201 });
 }

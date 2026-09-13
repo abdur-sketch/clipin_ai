@@ -17,6 +17,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const key = `exports/${user.id}/${id}.mp4`;
     await bindings.MEDIA.put(key,response.body,{httpMetadata:{contentType}});
     await bindings.DB.prepare("UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();
+    await bindings.DB.prepare("INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)").bind(`note_${crypto.randomUUID()}`,user.id,"export","Export MP4 selesai",`${String(clip.title)} siap diunduh.`,Date.now()).run();
     return Response.json({ok:true,status:"rendered",downloadUrl:`/api/clips/${id}/download`});
   }
   const result = await response.json() as { downloadUrl?: string };
@@ -26,5 +27,6 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const key = `exports/${user.id}/${id}.mp4`;
   await bindings.MEDIA.put(key,rendered.body,{httpMetadata:{contentType:rendered.headers.get("content-type") || "video/mp4"}});
   await bindings.DB.prepare("UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();
+  await bindings.DB.prepare("INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)").bind(`note_${crypto.randomUUID()}`,user.id,"export","Export MP4 selesai",`${String(clip.title)} siap diunduh.`,Date.now()).run();
   return Response.json({ok:true,status:"rendered",downloadUrl:`/api/clips/${id}/download`});
 }

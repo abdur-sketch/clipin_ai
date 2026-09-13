@@ -1,7 +1,7 @@
 import { detectMoments, type TranscriptSegment } from "@/lib/kliyu-ai";
 import { bindings, currentUser, id, jsonError } from "@/lib/server";
 
-type ProjectSource = { storage_key?: string; source_url?: string; title: string; content_type?: string };
+type ProjectSource = { storage_key?: string; source_url?: string; title: string; content_type?: string; language?:string; status?:string };
 type TranscriptionResponse = { text?: string; segments?: Array<{ start?: number; end?: number; text?: string }> };
 
 async function ensureStoredSource(projectId: string, project: ProjectSource) {
@@ -19,9 +19,12 @@ async function ensureStoredSource(projectId: string, project: ProjectSource) {
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser(), { id: projectId } = await params;
-  const project = await bindings.DB.prepare("SELECT storage_key,source_url,title,content_type FROM projects WHERE id=? AND user_id=?").bind(projectId,user.id).first<ProjectSource>();
+  const project = await bindings.DB.prepare("SELECT storage_key,source_url,title,content_type,language,status FROM projects WHERE id=? AND user_id=?").bind(projectId,user.id).first<ProjectSource>();
   if (!project) return jsonError("Project tidak ditemukan",404);
+  if (project.status === "complete") return jsonError("Project ini sudah selesai diproses",409);
   if (!bindings.OPENAI_API_KEY) return jsonError("KLIYU AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY untuk mengaktifkan transkripsi dan deteksi momen nyata.",503);
+  const quota = await bindings.DB.prepare("SELECT minutes_used,minutes_limit FROM subscriptions WHERE user_id=?").bind(user.id).first<{minutes_used:number;minutes_limit:number}>();
+  if (quota && quota.minutes_used >= quota.minutes_limit) return jsonError("Kuota menit bulan ini sudah habis. Upgrade paket untuk memproses video baru.",402);
   await bindings.DB.prepare("UPDATE projects SET status='processing',progress=20,error=NULL,updated_at=? WHERE id=?").bind(Date.now(),projectId).run();
   try {
     const storageKey = await ensureStoredSource(projectId, project);
@@ -33,18 +36,25 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const form = new FormData();
     form.append("file",new File([await object.arrayBuffer()],project.title.replace(/[^a-z0-9]+/gi,"-") + ".mp4",{type:object.httpMetadata?.contentType || project.content_type || "video/mp4"}));
     form.append("model","whisper-1"); form.append("response_format","verbose_json"); form.append("timestamp_granularities[]","segment");
+    if (project.language === "id" || project.language === "en") form.append("language",project.language);
     const transcription = await fetch("https://api.openai.com/v1/audio/transcriptions",{method:"POST",headers:{authorization:`Bearer ${bindings.OPENAI_API_KEY}`},body:form});
     if (!transcription.ok) throw new Error(`Transkripsi gagal (${transcription.status})`);
     const transcriptData = await transcription.json() as TranscriptionResponse;
     const transcript = transcriptData.text?.trim();
     if (!transcript) throw new Error("Transkripsi kosong");
     const segments: TranscriptSegment[] = (transcriptData.segments || []).map((segment) => ({ start: Number(segment.start || 0), end: Number(segment.end || 0), text: String(segment.text || "").trim() })).filter((segment) => segment.text && segment.end > segment.start);
+    const duration = segments.reduce((max,segment)=>Math.max(max,segment.end),0);
+    const usedMinutes = Math.max(1,Math.ceil(duration/60));
     await bindings.DB.prepare("UPDATE projects SET progress=68,updated_at=? WHERE id=?").bind(Date.now(),projectId).run();
     const moments = await detectMoments({ apiKey: bindings.OPENAI_API_KEY, model: bindings.OPENAI_MODEL, transcript, segments, safetyIdentifier: user.id });
     const now = Date.now();
+    const userDefaults = await bindings.DB.prepare("SELECT subtitle_style FROM user_settings WHERE user_id=?").bind(user.id).first<{subtitle_style?:string}>();
+    const subtitleStyle = ["clean","bold","karaoke"].includes(String(userDefaults?.subtitle_style)) ? String(userDefaults?.subtitle_style) : "bold";
     const statements = [bindings.DB.prepare("DELETE FROM clips WHERE project_id=?").bind(projectId),bindings.DB.prepare("INSERT OR REPLACE INTO transcripts (project_id,text,segments,provider,created_at) VALUES (?,?,?,?,?)").bind(projectId,transcript,JSON.stringify(segments),"openai-whisper",now)];
-    for (const moment of moments) statements.push(bindings.DB.prepare("INSERT INTO clips (id,project_id,start_time,end_time,score,title,hook,caption,subtitles,reason,category,style,face_tracking,hook_overlay,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'bold',1,1,'ready',?,?)").bind(id("clip"),projectId,moment.start,moment.end,moment.score,moment.title,moment.hook,`${moment.hook} ${moment.reason}`,JSON.stringify(segments.filter((segment) => segment.end >= moment.start && segment.start <= moment.end)),moment.reason,moment.category,now,now));
-    statements.push(bindings.DB.prepare("UPDATE projects SET status='complete',progress=100,updated_at=? WHERE id=?").bind(now,projectId));
+    for (const moment of moments) statements.push(bindings.DB.prepare("INSERT INTO clips (id,project_id,start_time,end_time,score,title,hook,caption,subtitles,reason,category,style,face_tracking,hook_overlay,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1,'ready',?,?)").bind(id("clip"),projectId,moment.start,moment.end,moment.score,moment.title,moment.hook,`${moment.hook} ${moment.reason}`,JSON.stringify(segments.filter((segment) => segment.end >= moment.start && segment.start <= moment.end)),moment.reason,moment.category,subtitleStyle,now,now));
+    statements.push(bindings.DB.prepare("UPDATE projects SET status='complete',progress=100,duration=?,updated_at=? WHERE id=?").bind(duration,now,projectId));
+    statements.push(bindings.DB.prepare("INSERT INTO subscriptions (user_id,minutes_used,updated_at) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET minutes_used=minutes_used+excluded.minutes_used,updated_at=excluded.updated_at").bind(user.id,usedMinutes,now));
+    statements.push(bindings.DB.prepare("INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)").bind(id("note"),user.id,"processing","Analisis selesai",`${moments.length} momen terbaik ditemukan dari ${project.title}.`,now));
     await bindings.DB.batch(statements);
     return Response.json({ok:true,provider:"openai",clips:moments.length});
   } catch (error) {
