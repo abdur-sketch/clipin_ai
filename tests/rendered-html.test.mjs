@@ -70,3 +70,11 @@ test("account settings and authenticated sign-out remain wired", async () => {
   assert.match(capabilities, /RENDER_SERVICE_URL/);
   assert.match(notifications, /UPDATE notifications SET read=1/);
 });
+
+test("campaign marketplace supports brand creation, join, submissions, review, earnings, and payout", async()=>{
+  const [page,market,campaigns,join,submissions,review,wallet,migration]=await Promise.all([source("app/page.tsx"),source("app/marketplace.tsx"),source("app/api/campaigns/route.ts"),source("app/api/campaigns/[id]/join/route.ts"),source("app/api/submissions/route.ts"),source("app/api/submissions/[id]/route.ts"),source("app/api/wallet/route.ts"),source("drizzle/0005_wise_sharon_ventura.sql")]);
+  for(const feature of ["Campaigns","Marketplace"])assert.ok(page.includes(feature));
+  for(const feature of ["Discover","My Submissions","Earnings","Brand Dashboard","Join Campaign","Create with KLIYU AI","Submit for review","Request payout","Create campaign"])assert.ok(market.includes(feature),`missing ${feature}`);
+  assert.match(campaigns,/INSERT INTO campaigns/);assert.match(join,/campaign_participants/);assert.match(submissions,/campaign_submissions/);assert.match(review,/spent_budget=spent_budget/);assert.match(wallet,/Minimum payout Rp50\.000/);
+  for(const table of ["campaigns","campaign_participants","campaign_submissions","payout_requests"])assert.ok(migration.includes(`CREATE TABLE \`${table}\``));
+});

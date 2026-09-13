@@ -70,3 +70,27 @@ export const subscriptions = sqliteTable("subscriptions", {
   billingCycle: text("billing_cycle").notNull().default("monthly"), minutesLimit: integer("minutes_limit").notNull().default(15),
   minutesUsed: integer("minutes_used").notNull().default(8), trialEndsAt: integer("trial_ends_at"), currentPeriodEndsAt: integer("current_period_ends_at"), updatedAt: integer("updated_at").notNull(),
 });
+
+export const campaigns = sqliteTable("campaigns", {
+  id:text("id").primaryKey(), ownerUserId:text("owner_user_id").notNull(), title:text("title").notNull(), brandName:text("brand_name").notNull(),
+  category:text("category").notNull(), contentType:text("content_type").notNull(), description:text("description").notNull(),
+  platforms:text("platforms").notNull().default("[]"), tags:text("tags").notNull().default("[]"), briefUrl:text("brief_url"), assetUrl:text("asset_url"),
+  paymentType:text("payment_type").notNull().default("per_video"), rate:integer("rate").notNull(), totalBudget:integer("total_budget").notNull(),
+  spentBudget:integer("spent_budget").notNull().default(0), minViews:integer("min_views").notNull().default(0), maxViews:integer("max_views").notNull().default(0),
+  status:text("status").notNull().default("open"), deadline:integer("deadline"), createdAt:integer("created_at").notNull(), updatedAt:integer("updated_at").notNull(),
+});
+
+export const campaignParticipants = sqliteTable("campaign_participants", {
+  id:text("id").primaryKey(), campaignId:text("campaign_id").notNull(), userId:text("user_id").notNull(), status:text("status").notNull().default("joined"), joinedAt:integer("joined_at").notNull(),
+});
+
+export const campaignSubmissions = sqliteTable("campaign_submissions", {
+  id:text("id").primaryKey(), campaignId:text("campaign_id").notNull(), userId:text("user_id").notNull(), clipId:text("clip_id"), platform:text("platform").notNull(),
+  contentUrl:text("content_url").notNull(), status:text("status").notNull().default("pending"), views:integer("views").notNull().default(0), earnings:integer("earnings").notNull().default(0),
+  rejectionReason:text("rejection_reason"), createdAt:integer("created_at").notNull(), updatedAt:integer("updated_at").notNull(),
+});
+
+export const payoutRequests = sqliteTable("payout_requests", {
+  id:text("id").primaryKey(), userId:text("user_id").notNull(), amount:integer("amount").notNull(), method:text("method").notNull(), account:text("account").notNull(),
+  status:text("status").notNull().default("pending"), createdAt:integer("created_at").notNull(), updatedAt:integer("updated_at").notNull(),
+});

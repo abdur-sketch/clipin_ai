@@ -11,6 +11,8 @@
 - My Clips: All, Hot, Ready, Exported
 - Kliyu Studio: trim, rasio 9:16/1:1/16:9, captions, subtitle style, hook, font size, logo, dan watermark
 - Template library dan export MP4 melalui layanan FFmpeg
+- Campaign marketplace: discover, brief/assets, join, submission URL, brand review, verified views, earnings, dan payout request
+- Brand Dashboard untuk membuat campaign, mengelola budget, dan menyetujui submission
 - Cloudflare D1 untuk metadata dan R2 untuk source, logo, serta hasil render
 
 ## Menjalankan lokal

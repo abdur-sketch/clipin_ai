@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUpRight, Bell, Check, CheckCircle2,
-  CircleHelp, Clapperboard, Copy, Download, Eye, FileVideo2, Flame, FolderKanban, Gauge, HomeIcon,
+  BriefcaseBusiness, CircleHelp, Clapperboard, Copy, Download, Eye, FileVideo2, Flame, FolderKanban, Gauge, HomeIcon,
   Instagram, LayoutTemplate, Link2, MoreHorizontal, Music2, Pause, Pencil, Play, Plus,
   Settings, Share2, Sparkles, TrendingUp, UploadCloud, WandSparkles, X, Youtube,
 } from "lucide-react";
+import { Marketplace } from "./marketplace";
 
-type View = "dashboard" | "projects" | "clips" | "templates" | "settings";
+type View = "dashboard" | "projects" | "clips" | "templates" | "marketplace" | "settings";
 type Clip = {
   id: number | string; score: number; duration: number; title: string; hook: string;
   caption: string; status: "ready" | "rendering" | "rendered"; accent: string;
@@ -137,6 +138,7 @@ export default function Home() {
           <button onClick={() => clipItems[0] ? setEditor(clipItems[0]) : setToast("Buat atau buka project terlebih dahulu")}><span><Pencil /></span>Kliyu Studio</button>
           <button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span><Play /></span>My Clips <b>{clipItems.length}</b></button>
           <button className={view === "templates" ? "active" : ""} onClick={() => go("templates")}><span><LayoutTemplate /></span>Templates</button>
+          <button className={view === "marketplace" ? "active" : ""} onClick={() => go("marketplace")}><span><BriefcaseBusiness /></span>Campaigns</button>
           <button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span><FolderKanban /></span>Projects</button>
         </nav>
         <div className="sidebar-bottom">
@@ -149,17 +151,18 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-brand" onClick={() => go("dashboard")}><span className="brand-mark"><Clapperboard /></span>KLIYU.</button>
-          <div className="breadcrumbs">KLIYU <span>/</span> {view === "dashboard" ? "Home" : view === "clips" ? "My Clips" : view === "templates" ? "Templates" : view==="settings"?"Settings":"Projects"}</div>
+          <div className="breadcrumbs">KLIYU <span>/</span> {view === "dashboard" ? "Home" : view === "clips" ? "My Clips" : view === "templates" ? "Templates" : view==="marketplace"?"Campaigns":view==="settings"?"Settings":"Projects"}</div>
           <div className="top-actions"><button className="icon-button" aria-label="Bantuan" onClick={() => setHelpOpen(true)}><CircleHelp /></button><button className={`icon-button notification ${notices.some(item=>!item.read)?"has-unread":""}`} aria-label="Notifikasi" onClick={() => setNoticesOpen(true)}><Bell /></button><button className="primary small" onClick={() => setUploadOpen(true)}><Plus /> New project</button></div>
         </header>
         {view === "dashboard" && <Dashboard projects={projects} clips={clipItems} usage={usage.used} onUpload={() => setUploadOpen(true)} onStudio={() => clipItems[0] ? setEditor(clipItems[0]) : setToast("Buat atau buka project terlebih dahulu")} onClips={() => go("clips")} onOpenProject={openProject} onProjects={() => go("projects")} />}
         {view === "clips" && <ClipsPage projectTitle={projectTitle} items={clipItems} filter={filter} setFilter={setFilter} filtered={filtered} onBack={() => go("projects")} onNotice={setToast} onEdit={setEditor} onPreview={setPreview} onRender={renderClip} onExport={exportClip} onRenderAll={renderAll} renderingIds={renderingIds} />}
         {view === "projects" && <ProjectsPage projects={projects} onOpen={openProject} onUpload={() => setUploadOpen(true)} />}
         {view === "templates" && <TemplatesPage onUse={(style) => { if(!clipItems[0]){setToast("Buat atau buka project terlebih dahulu");return} const clip = { ...clipItems[0], style }; setClipItems((items) => items.map((item, index) => index === 0 ? clip : item)); setEditor(clip); }} />}
+        {view === "marketplace"&&<Marketplace notify={setToast} onCreateClip={()=>setUploadOpen(true)}/>}
         {view === "settings" && <SettingsPage notify={setToast} onUpgrade={()=>setUpgradeOpen(true)} plan={plan} accountName={accountName} accountEmail={accountEmail} />}
       </section>
 
-      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span><HomeIcon /></span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span><Play /></span>Clips</button><button className="mobile-create" aria-label="Buat dengan Kliyu AI" onClick={() => setUploadOpen(true)}><WandSparkles /></button><button onClick={() => clipItems[0] ? setEditor(clipItems[0]) : setToast("Buat atau buka project terlebih dahulu")}><span><Pencil /></span>Studio</button><button className={view === "templates" ? "active" : ""} onClick={() => go("templates")}><span><LayoutTemplate /></span>Templates</button><button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><span><Settings /></span>Settings</button></nav>
+      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span><HomeIcon /></span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span><Play /></span>Clips</button><button className="mobile-create" aria-label="Buat dengan Kliyu AI" onClick={() => setUploadOpen(true)}><WandSparkles /></button><button onClick={() => clipItems[0] ? setEditor(clipItems[0]) : setToast("Buat atau buka project terlebih dahulu")}><span><Pencil /></span>Studio</button><button className={view === "marketplace" ? "active" : ""} onClick={() => go("marketplace")}><span><BriefcaseBusiness /></span>Campaigns</button><button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><span><Settings /></span>Settings</button></nav>
       {uploadOpen && <UploadModal processing={processing} progress={progress} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
       {preview && <ClipPreview clip={preview} onClose={() => setPreview(null)} onEdit={() => { setPreview(null); setEditor(preview); }} />}
       {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={saveClip} onNotice={setToast} />}
