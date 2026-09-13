@@ -28,24 +28,6 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!processing) return;
-    const timer = window.setInterval(() => {
-      setProgress((value) => {
-        if (value >= 100) {
-          window.clearInterval(timer);
-          window.setTimeout(() => {
-            setProcessing(false); setUploadOpen(false); setView("clips");
-            setToast("Analisis selesai — 6 klip terbaik ditemukan");
-          }, 450);
-          return 100;
-        }
-        return Math.min(value + 4, 100);
-      });
-    }, 90);
-    return () => window.clearInterval(timer);
-  }, [processing]);
-
-  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
@@ -57,7 +39,22 @@ export default function Home() {
     return true;
   }), [filter]);
 
-  function startUpload() { setProgress(0); setProcessing(true); }
+  async function startUpload(file?: File) {
+    setProgress(8); setProcessing(true);
+    try {
+      const title = file?.name.replace(/\.[^.]+$/, "") || "Podcast Bisnis: Mulai dari Nol";
+      const created = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, filename: file?.name, contentType: file?.type }) });
+      if (!created.ok) throw new Error((await created.json()).error || "Gagal membuat project");
+      const { project } = await created.json() as { project: { id: string } }; setProgress(22);
+      if (file) {
+        const uploaded = await fetch(`/api/projects/${project.id}/upload`, { method: "PUT", headers: { "content-type": file.type || "video/mp4" }, body: file });
+        if (!uploaded.ok) throw new Error((await uploaded.json()).error || "Upload gagal"); setProgress(52);
+      }
+      const processed = await fetch(`/api/projects/${project.id}/process`, { method: "POST" });
+      if (!processed.ok) throw new Error((await processed.json()).error || "Analisis gagal");
+      setProgress(100); window.setTimeout(() => { setProcessing(false); setUploadOpen(false); setView("clips"); setToast("Analisis selesai — 6 klip terbaik ditemukan dan disimpan"); }, 500);
+    } catch (error) { setProcessing(false); setToast(error instanceof Error ? error.message : "Terjadi kesalahan"); }
+  }
   function go(next: View) { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
   return (
@@ -126,10 +123,10 @@ function ProjectsPage({ onOpen, onUpload }: { onOpen: () => void; onUpload: () =
   return <div className="page projects-page"><div className="simple-heading"><div><span className="eyebrow"><i /> YOUR LIBRARY</span><h1>Semua project</h1><p>Kelola video panjang dan semua klip yang sudah dihasilkan.</p></div><button className="primary" onClick={onUpload}>＋ New project</button></div><div className="table-card"><div className="table-row table-head"><span>PROJECT</span><span>STATUS</span><span>CLIPS</span><span>CREATED</span><span /></div>{rows.map((item, index) => <button className="table-row" key={item[0]} onClick={onOpen}><span className="project-cell"><i className={`table-thumb thumb-${index + 1}`} /><span><strong>{item[0]}</strong><small>{item[1]} · Indonesian</small></span></span><span><b className={`table-status ${item[2].toLowerCase()}`}>{item[2]}</b></span><span>{item[3]}</span><span>{item[4]}</span><span>→</span></button>)}</div></div>;
 }
 
-function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (file?: File) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const steps = ["Mengunggah video", "Mengekstrak audio", "Membuat transkrip", "Mendeteksi momen terbaik"];
   const activeStep = Math.min(Math.floor(progress / 26), 3);
-  return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="upload-modal" role="dialog" aria-modal="true" aria-label="Upload video baru"><button className="close-button" onClick={onClose} disabled={processing}>×</button>{!processing ? <><span className="modal-kicker">NEW PROJECT</span><h2>Video panjang masuk.<br /><em>Klip terbaik keluar.</em></h2><p>Unggah video Anda dan biarkan CLIPIN menemukan momen paling menarik.</p><button className="modal-drop" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (event.dataTransfer.files[0]) onStart(); }}><span>↑</span><strong>Pilih atau drop video untuk diunggah</strong><small>MP4 atau MOV · maksimal 2 GB</small></button><input ref={inputRef} type="file" accept="video/mp4,video/quicktime" hidden onChange={(event) => event.target.files?.[0] && onStart()} /><div className="or"><span />atau coba demo<span /></div><button className="primary demo-button" onClick={onStart}>Gunakan video contoh <span>→</span></button></> : <><span className="modal-kicker live">● ANALYZING VIDEO</span><h2>Menemukan momen<br /><em>terbaik Anda.</em></h2><div className="processing-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><span>ANALYZING</span></div></div><div className="processing-steps">{steps.map((step, index) => <div key={step} className={index < activeStep ? "done" : index === activeStep ? "active" : ""}><span>{index < activeStep ? "✓" : index + 1}</span><b>{step}</b>{index === activeStep && <i />}</div>)}</div></>}</section></div>;
+  return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="upload-modal" role="dialog" aria-modal="true" aria-label="Upload video baru"><button className="close-button" onClick={onClose} disabled={processing}>×</button>{!processing ? <><span className="modal-kicker">NEW PROJECT</span><h2>Video panjang masuk.<br /><em>Klip terbaik keluar.</em></h2><p>Unggah video Anda dan biarkan CLIPIN menemukan momen paling menarik.</p><button className="modal-drop" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file=event.dataTransfer.files[0]; if(file) onStart(file); }}><span>↑</span><strong>Pilih atau drop video untuk diunggah</strong><small>MP4 atau MOV · maksimal 2 GB</small></button><input ref={inputRef} type="file" accept="video/mp4,video/quicktime" hidden onChange={(event) => { const file=event.target.files?.[0]; if(file) onStart(file); }} /><div className="or"><span />atau coba demo<span /></div><button className="primary demo-button" onClick={() => onStart()}>Gunakan video contoh <span>→</span></button></> : <><span className="modal-kicker live">● ANALYZING VIDEO</span><h2>Menemukan momen<br /><em>terbaik Anda.</em></h2><div className="processing-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><span>ANALYZING</span></div></div><div className="processing-steps">{steps.map((step, index) => <div key={step} className={index < activeStep ? "done" : index === activeStep ? "active" : ""}><span>{index < activeStep ? "✓" : index + 1}</span><b>{step}</b>{index === activeStep && <i />}</div>)}</div></>}</section></div>;
 }
 
 function ClipEditor({ clip, onClose, onSave }: { clip: Clip; onClose: () => void; onSave: () => void }) {
