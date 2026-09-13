@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUpRight, Bell, Check, CheckCircle2,
-  CircleHelp, Clapperboard, Copy, Eye, Flame, FolderKanban, Gauge, HomeIcon,
+  CircleHelp, Clapperboard, Copy, Eye, FileVideo2, Flame, FolderKanban, Gauge, HomeIcon,
   Instagram, Link2, MoreHorizontal, Music2, Pause, Pencil, Play, Plus,
   Rocket, Settings, Share2, Sparkles, TrendingUp, UploadCloud, X, Youtube,
 } from "lucide-react";
@@ -52,7 +52,8 @@ export default function Home() {
     setProgress(8); setProcessing(true);
     try {
       const file = source instanceof File ? source : undefined; const sourceUrl = typeof source === "string" ? source : undefined;
-      const title = file?.name.replace(/\.[^.]+$/, "") || (sourceUrl ? "Video YouTube Baru" : "Podcast Bisnis: Mulai dari Nol");
+      const sourceHost = sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "";
+      const title = file?.name.replace(/\.[^.]+$/, "") || (sourceUrl ? `Video dari ${sourceHost}` : "Podcast Bisnis: Mulai dari Nol");
       const created = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, filename: file?.name, contentType: file?.type, sourceUrl }) });
       if (!created.ok) throw new Error((await created.json()).error || "Gagal membuat project");
       const { project } = await created.json() as { project: { id: string } }; setProgress(22);
@@ -167,10 +168,55 @@ function SettingsPage({notify,onUpgrade,plan}:{notify:(message:string)=>void;onU
 
 function UpgradeModal({plan,onClose,onUpgraded}:{plan:string;onClose:()=>void;onUpgraded:()=>void}){const [annual,setAnnual]=useState(false),[loading,setLoading]=useState(false);async function trial(){setLoading(true);try{const response=await fetch("/api/account",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"upgrade",plan:"trial",billingCycle:annual?"annual":"monthly"})});if(!response.ok)throw new Error((await response.json()).error);onUpgraded()}finally{setLoading(false)}}return <div className="modal-backdrop"><section className="upgrade-modal" role="dialog" aria-modal="true"><button className="close-button" aria-label="Tutup pilihan paket" onClick={onClose}><X /></button><span className="modal-kicker">CHOOSE YOUR PLAN</span><h2>Lebih banyak video.<br/><em>Lebih sedikit kerja manual.</em></h2><div className="billing-toggle"><button className={!annual?"active":""} onClick={()=>setAnnual(false)}>Bulanan</button><button className={annual?"active":""} onClick={()=>setAnnual(true)}>Tahunan <b>HEMAT 20%</b></button></div><div className="pricing-grid"><article><small>FREE</small><strong>Rp0</strong><span>/bulan</span><ul><li>15 menit video</li><li>6 clips per project</li><li>720p export</li></ul><button disabled>{plan}</button></article><article className="popular"><em>PALING POPULER</em><small>PRO</small><strong>{annual?"Rp119K":"Rp149K"}</strong><span>/bulan</span><ul><li>300 menit video</li><li>Full HD export</li><li>Channel Watch</li><li>Auto posting</li></ul><button disabled={loading} onClick={trial}>{loading?"Mengaktifkan...":"Coba gratis 7 hari"}</button></article><article><small>BUSINESS</small><strong>{annual?"Rp319K":"Rp399K"}</strong><span>/bulan</span><ul><li>1.000 menit video</li><li>5 anggota tim</li><li>Priority rendering</li></ul><button onClick={()=>alert("Tim sales akan menghubungi Anda.")}>Hubungi sales</button></article></div><p>Trial tidak memerlukan kartu kredit. Batalkan kapan saja.</p></section></div>}
 
-function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (file?: File) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
-  const steps = ["Mengunggah video", "Mengekstrak audio", "Membuat transkrip", "Mendeteksi momen terbaik"];
+function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (source?: File | string) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+  const [sourceMode, setSourceMode] = useState<"file" | "link">("file");
+  const [videoLink, setVideoLink] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const steps = [sourceMode === "link" ? "Mengimpor link video" : "Mengunggah video", "Mengekstrak audio", "Membuat transkrip", "Mendeteksi momen terbaik"];
   const activeStep = Math.min(Math.floor(progress / 26), 3);
-  return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="upload-modal" role="dialog" aria-modal="true" aria-label="Upload video baru"><button className="close-button" aria-label="Tutup upload" onClick={onClose} disabled={processing}><X /></button>{!processing ? <><span className="modal-kicker">NEW PROJECT</span><h2>Video panjang masuk.<br /><em>Klip terbaik keluar.</em></h2><p>Unggah video Anda dan biarkan CLIPIN menemukan momen paling menarik.</p><button className="modal-drop" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file=event.dataTransfer.files[0]; if(file) onStart(file); }}><span><UploadCloud /></span><strong>Pilih atau drop video untuk diunggah</strong><small>MP4 atau MOV · maksimal 2 GB</small></button><input ref={inputRef} type="file" accept="video/mp4,video/quicktime" hidden onChange={(event) => { const file=event.target.files?.[0]; if(file) onStart(file); }} /><div className="or"><span />atau coba demo<span /></div><button className="primary demo-button" onClick={() => onStart()}>Gunakan video contoh <ArrowRight /></button></> : <><span className="modal-kicker live">● ANALYZING VIDEO</span><h2>Menemukan momen<br /><em>terbaik Anda.</em></h2><div className="processing-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><span>ANALYZING</span></div></div><div className="processing-steps">{steps.map((step, index) => <div key={step} className={index < activeStep ? "done" : index === activeStep ? "active" : ""}><span>{index < activeStep ? <Check /> : index + 1}</span><b>{step}</b>{index === activeStep && <i />}</div>)}</div></>}</section></div>;
+
+  function submitLink() {
+    const value = videoLink.trim();
+    try {
+      const parsed = new URL(value);
+      if (!/^https?:$/.test(parsed.protocol)) throw new Error();
+      setLinkError("");
+      onStart(value);
+    } catch {
+      setLinkError("Masukkan link video yang valid, diawali http:// atau https://");
+    }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="upload-modal" role="dialog" aria-modal="true" aria-label="Buat project video baru">
+      <button className="close-button" aria-label="Tutup New Project" onClick={onClose} disabled={processing}><X /></button>
+      {!processing ? <>
+        <span className="modal-kicker">NEW PROJECT</span>
+        <h2>Video panjang masuk.<br /><em>Klip terbaik keluar.</em></h2>
+        <p>Pilih video asli dari perangkat atau tempel link video yang dapat diakses publik.</p>
+        <div className="source-tabs" role="tablist" aria-label="Pilih sumber video">
+          <button role="tab" aria-selected={sourceMode === "file"} className={sourceMode === "file" ? "active" : ""} onClick={() => { setSourceMode("file"); setLinkError(""); }}><FileVideo2 /> Video asli</button>
+          <button role="tab" aria-selected={sourceMode === "link"} className={sourceMode === "link" ? "active" : ""} onClick={() => setSourceMode("link")}><Link2 /> Link video</button>
+        </div>
+        {sourceMode === "file" ? <>
+          <button className="modal-drop" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) onStart(file); }}>
+            <span><UploadCloud /></span><strong>Pilih atau drop video asli</strong><small>MP4 atau MOV · maksimal 2 GB</small>
+          </button>
+          <input ref={inputRef} type="file" accept="video/mp4,video/quicktime" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onStart(file); }} />
+        </> : <div className="link-source-panel">
+          <label htmlFor="new-project-video-link">Link video publik</label>
+          <div className={`video-link-input ${linkError ? "invalid" : ""}`}><Link2 /><input id="new-project-video-link" value={videoLink} onChange={(event) => { setVideoLink(event.target.value); setLinkError(""); }} onKeyDown={(event) => { if (event.key === "Enter") submitLink(); }} placeholder="https://youtube.com/watch?v=..." inputMode="url" autoFocus /><button onClick={submitLink} disabled={!videoLink.trim()}>Proses <ArrowRight /></button></div>
+          {linkError ? <small className="link-error">{linkError}</small> : <small>YouTube, TikTok, Instagram, atau link video publik lainnya.</small>}
+        </div>}
+        <div className="or"><span />atau coba tanpa mengunggah<span /></div>
+        <button className="primary demo-button" onClick={() => onStart()}>Gunakan video contoh <ArrowRight /></button>
+      </> : <>
+        <span className="modal-kicker live">● ANALYZING VIDEO</span><h2>Menemukan momen<br /><em>terbaik Anda.</em></h2>
+        <div className="processing-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><span>ANALYZING</span></div></div>
+        <div className="processing-steps">{steps.map((step, index) => <div key={step} className={index < activeStep ? "done" : index === activeStep ? "active" : ""}><span>{index < activeStep ? <Check /> : index + 1}</span><b>{step}</b>{index === activeStep && <i />}</div>)}</div>
+      </>}
+    </section>
+  </div>;
 }
 
 function ClipEditor({ clip, onClose, onSave }: { clip: Clip; onClose: () => void; onSave: () => void }) {

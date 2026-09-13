@@ -35,6 +35,7 @@ test("source includes every interactive V0.1 flow", async () => {
     "filter === \"hot\"", "filter === \"rendered\"", "ClipEditor",
     "Burn subtitles", "Face tracking", "Hook overlay", "Karaoke",
     "Render all", "ProjectsPage", "toast", "inputRef.current?.click()",
+    "Video asli", "Link video", "submitLink", "sourceMode === \"link\"",
   ]) assert.ok(page.includes(required), `missing flow: ${required}`);
 
   assert.match(css, /@media\(max-width:720px\)/);
@@ -43,6 +44,18 @@ test("source includes every interactive V0.1 flow", async () => {
   assert.match(layout, /\/og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await access(new URL("public/og.png", root));
+});
+
+test("new project accepts original files and public video links", async () => {
+  const [page, projectsApi] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/projects/route.ts", root), "utf8"),
+  ]);
+  assert.match(page, /onStart: \(source\?: File \| string\)/);
+  assert.match(page, /accept="video\/mp4,video\/quicktime"/);
+  assert.match(page, /new URL\(value\)/);
+  assert.match(projectsApi, /sourceType = host\.includes\("youtube\.com"\)/);
+  assert.match(projectsApi, /Link video tidak valid/);
 });
 
 test("dummy dataset exposes hot, rendered, and editable clips", async () => {
