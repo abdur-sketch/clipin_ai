@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 
-type AppEnv = { DB: D1Database; MEDIA: R2Bucket; OPENAI_API_KEY?: string; RENDER_SERVICE_URL?: string; RENDER_SERVICE_TOKEN?: string; YOUTUBE_API_KEY?: string; PUBLISH_SERVICE_URL?: string };
+type AppEnv = { DB: D1Database; MEDIA: R2Bucket; OPENAI_API_KEY?: string; RENDER_SERVICE_URL?: string; RENDER_SERVICE_TOKEN?: string; YOUTUBE_API_KEY?: string; PUBLISH_SERVICE_URL?: string; BILLING_SERVICE_URL?: string; BILLING_SERVICE_TOKEN?: string };
 export const bindings = env as unknown as AppEnv;
 
 export async function currentUser() {

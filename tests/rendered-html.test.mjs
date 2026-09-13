@@ -70,3 +70,16 @@ test("autopilot covers monitoring, approval, posting, analytics, and affiliate",
   assert.match(migration,/CREATE TABLE `channels`/);
   assert.match(migration,/CREATE TABLE `publications`/);
 });
+
+test("account tools persist settings, usage, plans, and profile actions", async () => {
+  const [page, account, schema, migration] = await Promise.all([
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/account/route.ts", root), "utf8"),
+    readFile(new URL("db/schema.ts", root), "utf8"),
+    readFile(new URL("drizzle/0002_icy_skullbuster.sql", root), "utf8"),
+  ]);
+  for (const feature of ["Upgrade Plan","SettingsPage","UpgradeModal","Billing & plan","Sign out","Coba gratis 7 hari","Save changes"]) assert.ok(page.includes(feature),`missing ${feature}`);
+  assert.match(account,/user_settings/); assert.match(account,/subscriptions/); assert.match(account,/trialing/);
+  assert.match(schema,/userSettings/); assert.match(schema,/subscriptions/);
+  assert.match(migration,/CREATE TABLE `user_settings`/); assert.match(migration,/CREATE TABLE `subscriptions`/);
+});

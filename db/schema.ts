@@ -55,3 +55,15 @@ export const referrals = sqliteTable("referrals", {
   id: text("id").primaryKey(), userId: text("user_id").notNull(), code: text("code").notNull().unique(), clicks: integer("clicks").notNull().default(0),
   signups: integer("signups").notNull().default(0), conversions: integer("conversions").notNull().default(0), earnings: integer("earnings").notNull().default(0), createdAt: integer("created_at").notNull(),
 });
+
+export const userSettings = sqliteTable("user_settings", {
+  userId: text("user_id").primaryKey(), language: text("language").notNull().default("id"), timezone: text("timezone").notNull().default("Asia/Jakarta"),
+  subtitleStyle: text("subtitle_style").notNull().default("bold"), emailNotifications: integer("email_notifications", { mode: "boolean" }).notNull().default(true),
+  processingNotifications: integer("processing_notifications", { mode: "boolean" }).notNull().default(true), publishNotifications: integer("publish_notifications", { mode: "boolean" }).notNull().default(true), updatedAt: integer("updated_at").notNull(),
+});
+
+export const subscriptions = sqliteTable("subscriptions", {
+  userId: text("user_id").primaryKey(), plan: text("plan").notNull().default("free"), status: text("status").notNull().default("active"),
+  billingCycle: text("billing_cycle").notNull().default("monthly"), minutesLimit: integer("minutes_limit").notNull().default(15),
+  minutesUsed: integer("minutes_used").notNull().default(8), trialEndsAt: integer("trial_ends_at"), currentPeriodEndsAt: integer("current_period_ends_at"), updatedAt: integer("updated_at").notNull(),
+});

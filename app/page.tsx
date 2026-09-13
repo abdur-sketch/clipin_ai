@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "dashboard" | "projects" | "clips" | "autopilot";
+type View = "dashboard" | "projects" | "clips" | "autopilot" | "settings";
 type Clip = {
   id: number; score: number; duration: number; title: string; hook: string;
   caption: string; status: "ready" | "rendered"; accent: string;
@@ -25,6 +25,7 @@ export default function Home() {
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [toast, setToast] = useState("");
+  const [upgradeOpen,setUpgradeOpen]=useState(false); const [profileOpen,setProfileOpen]=useState(false); const [plan,setPlan]=useState("Free plan");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -32,6 +33,8 @@ export default function Home() {
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(()=>{fetch("/api/account").then(response=>response.ok?response.json():null).then(data=>{if(data?.subscription?.plan==="pro")setPlan(data.subscription.status==="trialing"?"Pro trial":"Pro plan")}).catch(()=>{})},[]);
 
   const filtered = useMemo(() => clips.filter((clip) => {
     if (filter === "hot") return clip.score >= 85;
@@ -70,27 +73,29 @@ export default function Home() {
           <button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span>✦</span>Autopilot <b>NEW</b></button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="usage-card"><div className="usage-icon">✦</div><strong>8 dari 15 menit</strong><span>Terpakai bulan ini</span><div className="usage-bar"><i /></div><button onClick={() => setToast("Paket Pro segera tersedia")}>Upgrade Plan ↗</button></div>
-          <button className="settings-button" onClick={() => setToast("Pengaturan segera tersedia")}><span>⚙</span>Settings</button>
-          <div className="profile"><div className="avatar">AP</div><div><strong>Andi Pratama</strong><span>Free plan</span></div><button aria-label="Menu profil" onClick={() => setToast("Menu profil segera tersedia")}>•••</button></div>
+          <div className="usage-card"><div className="usage-icon">✦</div><strong>{plan==="Free plan"?"8 dari 15":"8 dari 300"} menit</strong><span>Terpakai bulan ini</span><div className="usage-bar"><i style={{width:plan==="Free plan"?"54%":"3%"}} /></div><button onClick={() => setUpgradeOpen(true)}>Upgrade Plan ↗</button></div>
+          <button className={`settings-button ${view==="settings"?"active":""}`} onClick={() => go("settings")}><span>⚙</span>Settings</button>
+          <div className="profile-wrap"><div className="profile"><div className="avatar">AP</div><div><strong>Andi Pratama</strong><span>{plan}</span></div><button aria-label="Menu profil" onClick={() => setProfileOpen(!profileOpen)}>•••</button></div>{profileOpen&&<div className="profile-menu"><button onClick={()=>{go("settings");setProfileOpen(false)}}>Account settings</button><button onClick={()=>{setUpgradeOpen(true);setProfileOpen(false)}}>Billing & plan</button><a href="/signout-with-chatgpt?return_to=/">Sign out</a></div>}</div>
         </div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-brand" onClick={() => go("dashboard")}><span className="brand-mark">C</span>CLIPIN.</button>
-          <div className="breadcrumbs">Workspace <span>/</span> {view === "dashboard" ? "Dashboard" : view === "clips" ? "Detected Clips" : view === "autopilot" ? "Autopilot" : "Projects"}</div>
+          <div className="breadcrumbs">Workspace <span>/</span> {view === "dashboard" ? "Dashboard" : view === "clips" ? "Detected Clips" : view === "autopilot" ? "Autopilot" : view==="settings"?"Settings":"Projects"}</div>
           <div className="top-actions"><button className="icon-button" aria-label="Bantuan" onClick={() => setToast("Pusat bantuan segera tersedia")}>?</button><button className="icon-button notification" aria-label="Notifikasi" onClick={() => setToast("Tidak ada notifikasi baru")}>♢</button><button className="primary small" onClick={() => setUploadOpen(true)}>＋ New project</button></div>
         </header>
         {view === "dashboard" && <Dashboard onUpload={() => setUploadOpen(true)} onClips={() => go("clips")} onProjects={() => go("projects")} />}
         {view === "clips" && <ClipsPage filter={filter} setFilter={setFilter} filtered={filtered} onBack={() => go("projects")} onNotice={setToast} onEdit={setEditor} onRender={(clip) => setToast(`CLIP #${String(clip.id).padStart(2, "0")} masuk antrean render`)} />}
         {view === "projects" && <ProjectsPage onOpen={() => go("clips")} onUpload={() => setUploadOpen(true)} />}
         {view === "autopilot" && <AutopilotPage notify={setToast} />}
+        {view === "settings" && <SettingsPage notify={setToast} onUpgrade={()=>setUpgradeOpen(true)} plan={plan} />}
       </section>
 
-      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span>⌂</span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span>▶</span>Clips</button><button className="mobile-create" onClick={() => setUploadOpen(true)}>＋</button><button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span>▣</span>Projects</button><button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span>✦</span>Autopilot</button></nav>
+      <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span>⌂</span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span>▶</span>Clips</button><button className="mobile-create" onClick={() => setUploadOpen(true)}>＋</button><button className={view === "projects" ? "active" : ""} onClick={() => go("projects")}><span>▣</span>Projects</button><button className={view === "autopilot" ? "active" : ""} onClick={() => go("autopilot")}><span>✦</span>Auto</button><button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><span>⚙</span>Settings</button></nav>
       {uploadOpen && <UploadModal processing={processing} progress={progress} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
       {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={() => { setEditor(null); setToast("Perubahan klip berhasil disimpan"); }} />}
+      {upgradeOpen&&<UpgradeModal plan={plan} onClose={()=>setUpgradeOpen(false)} onUpgraded={()=>{setPlan("Pro trial");setUpgradeOpen(false);setToast("Trial Pro 7 hari berhasil diaktifkan")}}/>}
       {toast && <div className="toast"><span>✓</span>{toast}</div>}
     </main>
   );
@@ -146,6 +151,15 @@ function AutopilotPage({ notify }: { notify: (message:string)=>void }) {
     </div>
   </div>
 }
+
+function SettingsPage({notify,onUpgrade,plan}:{notify:(message:string)=>void;onUpgrade:()=>void;plan:string}){
+  const [language,setLanguage]=useState("id"),[timezone,setTimezone]=useState("Asia/Jakarta"),[style,setStyle]=useState("bold"),[email,setEmail]=useState(true),[processing,setProcessing]=useState(true),[publishing,setPublishing]=useState(true),[saving,setSaving]=useState(false);
+  async function save(){setSaving(true);try{const response=await fetch("/api/account",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({language,timezone,subtitleStyle:style,emailNotifications:email,processingNotifications:processing,publishNotifications:publishing})});if(!response.ok)throw new Error("Gagal menyimpan");notify("Semua pengaturan berhasil disimpan")}catch(error){notify(error instanceof Error?error.message:"Gagal menyimpan")}finally{setSaving(false)}}
+  useEffect(()=>{fetch("/api/account").then(r=>r.ok?r.json():null).then(data=>{const s=data?.settings;if(!s)return;setLanguage(s.language);setTimezone(s.timezone);setStyle(s.subtitle_style);setEmail(Boolean(s.email_notifications));setProcessing(Boolean(s.processing_notifications));setPublishing(Boolean(s.publish_notifications))}).catch(()=>{})},[]);
+  return <div className="page settings-page"><div className="simple-heading"><div><span className="eyebrow"><i/> PERSONAL WORKSPACE</span><h1>Settings</h1><p>Kelola akun, preferensi video, dan notifikasi.</p></div><button className="primary" disabled={saving} onClick={save}>{saving?"Saving...":"Save changes"}</button></div><div className="settings-layout"><nav><button className="active">Account</button><button>Video defaults</button><button>Notifications</button><button>Billing</button></nav><div className="settings-content"><section className="settings-panel"><div><small>PROFILE</small><h2>Informasi akun</h2></div><div className="account-line"><span className="large-avatar">AP</span><div><strong>Andi Pratama</strong><span>Akun ChatGPT terverifikasi</span></div><a href="/signout-with-chatgpt?return_to=/">Sign out</a></div></section><section className="settings-panel"><div><small>VIDEO DEFAULTS</small><h2>Preferensi pemrosesan</h2></div><div className="settings-fields"><label>Bahasa transkripsi<select value={language} onChange={e=>setLanguage(e.target.value)}><option value="id">Bahasa Indonesia</option><option value="en">English</option><option value="auto">Auto detect</option></select></label><label>Zona waktu<select value={timezone} onChange={e=>setTimezone(e.target.value)}><option>Asia/Jakarta</option><option>Asia/Makassar</option><option>Asia/Jayapura</option></select></label><label>Gaya subtitle<select value={style} onChange={e=>setStyle(e.target.value)}><option value="clean">Clean</option><option value="bold">Bold</option><option value="karaoke">Karaoke</option></select></label></div></section><section className="settings-panel"><div><small>NOTIFICATIONS</small><h2>Pemberitahuan</h2></div><Toggle label="Email ringkasan mingguan" value={email} setValue={setEmail}/><Toggle label="Video selesai diproses" value={processing} setValue={setProcessing}/><Toggle label="Posting berhasil atau gagal" value={publishing} setValue={setPublishing}/></section><section className="settings-panel billing-panel"><div><small>BILLING</small><h2>Paket saat ini</h2></div><div><div><strong>{plan}</strong><span>{plan==="Free plan"?"15 menit pemrosesan per bulan":"300 menit pemrosesan per bulan"}</span></div><button onClick={onUpgrade}>{plan==="Free plan"?"Upgrade plan":"Manage plan"}</button></div><div className="invoice-row"><span>Riwayat tagihan</span><em>Belum ada transaksi</em></div></section></div></div></div>
+}
+
+function UpgradeModal({plan,onClose,onUpgraded}:{plan:string;onClose:()=>void;onUpgraded:()=>void}){const [annual,setAnnual]=useState(false),[loading,setLoading]=useState(false);async function trial(){setLoading(true);try{const response=await fetch("/api/account",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"upgrade",plan:"trial",billingCycle:annual?"annual":"monthly"})});if(!response.ok)throw new Error((await response.json()).error);onUpgraded()}finally{setLoading(false)}}return <div className="modal-backdrop"><section className="upgrade-modal" role="dialog" aria-modal="true"><button className="close-button" onClick={onClose}>×</button><span className="modal-kicker">CHOOSE YOUR PLAN</span><h2>Lebih banyak video.<br/><em>Lebih sedikit kerja manual.</em></h2><div className="billing-toggle"><button className={!annual?"active":""} onClick={()=>setAnnual(false)}>Bulanan</button><button className={annual?"active":""} onClick={()=>setAnnual(true)}>Tahunan <b>HEMAT 20%</b></button></div><div className="pricing-grid"><article><small>FREE</small><strong>Rp0</strong><span>/bulan</span><ul><li>15 menit video</li><li>6 clips per project</li><li>720p export</li></ul><button disabled>{plan}</button></article><article className="popular"><em>PALING POPULER</em><small>PRO</small><strong>{annual?"Rp119K":"Rp149K"}</strong><span>/bulan</span><ul><li>300 menit video</li><li>Full HD export</li><li>Channel Watch</li><li>Auto posting</li></ul><button disabled={loading} onClick={trial}>{loading?"Mengaktifkan...":"Coba gratis 7 hari"}</button></article><article><small>BUSINESS</small><strong>{annual?"Rp319K":"Rp399K"}</strong><span>/bulan</span><ul><li>1.000 menit video</li><li>5 anggota tim</li><li>Priority rendering</li></ul><button onClick={()=>alert("Tim sales akan menghubungi Anda.")}>Hubungi sales</button></article></div><p>Trial tidak memerlukan kartu kredit. Batalkan kapan saja.</p></section></div>}
 
 function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (file?: File) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const steps = ["Mengunggah video", "Mengekstrak audio", "Membuat transkrip", "Mendeteksi momen terbaik"];
