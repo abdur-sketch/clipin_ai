@@ -10,8 +10,8 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Menginstal Ollama, whisper.cpp, dan FFmpeg..."
-brew install ollama whisper-cpp ffmpeg
+echo "Menginstal Ollama, whisper.cpp, FFmpeg, dan yt-dlp..."
+brew install ollama whisper-cpp ffmpeg yt-dlp
 
 mkdir -p "$MODEL_DIR" "$PROJECT_DIR/.local-ai/logs" "$PROJECT_DIR/.local-ai/pids"
 if [ ! -s "$WHISPER_MODEL" ]; then

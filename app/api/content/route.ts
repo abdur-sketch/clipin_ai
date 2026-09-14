@@ -30,7 +30,7 @@ export async function POST(request:Request) {
     let externalUrl:string;try{const url=new URL(String(body.url||""));if(url.protocol!=="https:")throw new Error();externalUrl=url.toString()}catch{return jsonError("URL publikasi harus berupa HTTPS yang valid")}
     const clip=await bindings.DB.prepare("SELECT c.id FROM clips c JOIN projects p ON p.id=c.project_id WHERE c.id=? AND p.user_id=?").bind(clipId,user.id).first();if(!clip)return jsonError("Clip tidak ditemukan",404);
     const now=Date.now(),publishedAt=body.publishedAt?new Date(String(body.publishedAt)).getTime():now;if(!Number.isFinite(publishedAt))return jsonError("Tanggal publikasi tidak valid");
-    const publicationId=id("pub");await bindings.DB.prepare("INSERT INTO publications (id,user_id,clip_id,platform,status,published_at,external_url,views,likes,comments,shares,followers_gained,created_at,updated_at) VALUES (?,?,?,?,'published',?,?,0,0,0,0,0,?,?)").bind(publicationId,user.id,clipId,platform,publishedAt,externalUrl,now,now).run();return Response.json({ok:true,id:publicationId},{status:201});
+    const publicationId=id("pub");await bindings.DB.prepare("INSERT INTO publications (id,user_id,clip_id,platform,status,scheduled_at,published_at,external_url,views,likes,comments,shares,followers_gained,created_at,updated_at) VALUES (?,?,?,?,'published',?,?,?,0,0,0,0,0,?,?)").bind(publicationId,user.id,clipId,platform,publishedAt,publishedAt,externalUrl,now,now).run();return Response.json({ok:true,id:publicationId},{status:201});
   }
   if(action==="metrics"){
     const values=["views","likes","comments","shares","followersGained"].map(key=>Math.max(0,Math.round(Number(body[key]||0))));

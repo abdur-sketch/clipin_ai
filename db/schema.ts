@@ -21,6 +21,7 @@ export const clips = sqliteTable("clips", {
   reason: text("reason"), category: text("category"),
   style: text("style").notNull().default("bold"), faceTracking: integer("face_tracking", { mode: "boolean" }).notNull().default(true),
   hookOverlay: integer("hook_overlay", { mode: "boolean" }).notNull().default(true), aspectRatio: text("aspect_ratio").notNull().default("9:16"),
+  captionsEnabled: integer("captions_enabled", { mode: "boolean" }).notNull().default(true),
   fontSize: integer("font_size").notNull().default(48), watermark: integer("watermark", { mode: "boolean" }).notNull().default(true),
   logoKey: text("logo_key"), status: text("status").notNull().default("ready"),
   postCaption: text("post_caption"), postCta: text("post_cta"), postHashtags: text("post_hashtags").notNull().default("[]"),

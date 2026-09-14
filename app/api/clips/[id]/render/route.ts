@@ -10,15 +10,16 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (bindings.LOCAL_RENDER_BASE_URL) {
     const source = clip.storage_key ? await bindings.MEDIA.get(String(clip.storage_key)) : null;
     if (!source) { await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run(); return jsonError("Video sumber tidak ditemukan",404); }
+    const form = new FormData();
+    form.append("video", new File([await source.arrayBuffer()], "source-video", { type: source.httpMetadata?.contentType || "application/octet-stream" }));
+    if (clip.logo_key) {
+      const logo = await bindings.MEDIA.get(String(clip.logo_key));
+      if (logo) form.append("logo", new File([await logo.arrayBuffer()], "brand-logo", { type: logo.httpMetadata?.contentType || "image/png" }));
+    }
+    form.append("config", JSON.stringify({ start: clip.start_time, end: clip.end_time, aspectRatio: clip.aspect_ratio || "9:16", fontSize: clip.font_size || 48, style: clip.style || "bold", hook: clip.hook || "", hookOverlay: Boolean(clip.hook_overlay), captionsEnabled: Boolean(clip.captions_enabled), watermark: Boolean(clip.watermark), subtitles: JSON.parse(String(clip.subtitles || "[]")) }));
     response = await fetch(`${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/render`, {
       method: "POST",
-      headers: {
-        "content-type": source.httpMetadata?.contentType || "application/octet-stream",
-        "x-kliyu-start": String(clip.start_time),
-        "x-kliyu-end": String(clip.end_time),
-        "x-kliyu-aspect-ratio": String(clip.aspect_ratio || "9:16"),
-      },
-      body: await source.arrayBuffer(),
+      body: form,
     });
   } else {
     response = await fetch(`${bindings.RENDER_SERVICE_URL}/render`, { method: "POST", headers: { "content-type": "application/json", ...(bindings.RENDER_SERVICE_TOKEN ? { authorization: `Bearer ${bindings.RENDER_SERVICE_TOKEN}` } : {}) }, body: JSON.stringify(clip) });

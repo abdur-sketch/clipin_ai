@@ -29,10 +29,14 @@ async function transcribe(file: File, language?: string): Promise<TranscriptionR
 async function ensureStoredSource(projectId: string, project: ProjectSource) {
   if (project.storage_key) return project.storage_key;
   if (!project.source_url) return null;
-  const source = await fetch(project.source_url, { redirect: "follow", headers: { "user-agent": "KLIYU/1.0 video importer" } });
+  let source = await fetch(project.source_url, { redirect: "follow", headers: { "user-agent": "KLIYU/1.0 video importer" } });
+  let contentType = source.headers.get("content-type") || "";
+  if ((!source.ok || !source.body || !contentType.startsWith("video/")) && bindings.LOCAL_RENDER_BASE_URL) {
+    source = await fetch(`${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/import`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: project.source_url }) });
+    contentType = source.headers.get("content-type") || "";
+  }
   if (!source.ok || !source.body) throw new Error(`Video dari link tidak dapat diambil (${source.status})`);
-  const contentType = source.headers.get("content-type") || "";
-  if (!contentType.startsWith("video/")) throw new Error("Link tersebut bukan file video langsung. Gunakan link MP4/WebM publik atau unggah video asli.");
+  if (!contentType.startsWith("video/")) throw new Error("Link tersebut tidak menghasilkan file video. Pastikan link publik dan Anda memiliki izin menggunakannya.");
   const key = `imports/${projectId}/source`;
   await bindings.MEDIA.put(key, source.body, { httpMetadata: { contentType } });
   await bindings.DB.prepare("UPDATE projects SET storage_key=?,content_type=?,status='uploaded',progress=15,updated_at=? WHERE id=?").bind(key,contentType,Date.now(),projectId).run();

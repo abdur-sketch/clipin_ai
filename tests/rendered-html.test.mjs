@@ -23,6 +23,8 @@ test("new project accepts original files and honest direct video links", async (
   assert.doesNotMatch(page, /Gunakan video contoh/);
   assert.match(projectsApi, /Link video tidak valid/);
   assert.match(processApi, /contentType\.startsWith\("video\/"\)/);
+  assert.match(processApi, /\/import/);
+  assert.match(processApi, /LOCAL_RENDER_BASE_URL/);
 });
 
 test("real OpenAI and local AI pipelines replace fake output", async () => {
@@ -46,6 +48,7 @@ test("clip workflow includes filters, persistent Studio controls, render, and MP
   assert.match(renderApi, /RENDER_SERVICE_URL/);
   assert.match(renderApi, /LOCAL_RENDER_BASE_URL/);
   assert.match(localRender, /ffmpeg/);
+  for (const feature of ["captionsEnabled", "hookOverlay", "watermark", "logo", "loudnorm", "render-text-overlay"]) assert.ok((renderApi + localRender).includes(feature), `local render missing ${feature}`);
   assert.match(renderApi, /rendered_key/);
   assert.match(downloadApi, /content-disposition/i);
   assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
@@ -82,6 +85,7 @@ test("published content, analytics, monetization, and AI caption are fully wired
   for(const feature of ["Published","Analytics","Monetization"])assert.ok(page.includes(feature));
   for(const feature of ["Mark as Published","Update Performance","Content Analytics","Add Revenue","Revenue history"])assert.ok(contentUi.includes(feature),`missing ${feature}`);
   assert.match(contentApi,/INSERT INTO publications/);assert.match(contentApi,/UPDATE publications SET views/);assert.match(contentApi,/INSERT INTO revenue_entries/);
+  assert.match(contentApi,/scheduled_at,published_at/);
   assert.match(ai,/kliyu_social_caption/);assert.match(captionApi,/post_hashtags/);assert.match(page,/Generate Caption/);assert.match(page,/Copy Caption/);
   assert.match(migration,/CREATE TABLE `revenue_entries`/);assert.match(migration,/post_caption/);assert.match(migration,/followers_gained/);
 });

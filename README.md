@@ -5,11 +5,11 @@
 ## MVP v1.0
 
 - Personal workspace dengan Sign in with ChatGPT
-- Upload MP4/MOV atau impor link file video MP4/WebM publik
+- Upload MP4/MOV, impor file video publik, atau ambil video milik Anda dari YouTube/Instagram/TikTok pada mode lokal
 - Transkripsi bertimestamp melalui OpenAI Whisper atau whisper.cpp lokal
 - Kliyu AI moment detection memakai OpenAI Responses API atau Ollama lokal dengan structured output
 - My Clips: All, Hot, Ready, Exported
-- Kliyu Studio: trim, rasio 9:16/1:1/16:9, captions, subtitle style, hook, font size, logo, dan watermark
+- Kliyu Studio: trim, rasio 9:16/1:1/16:9, burn-in captions bertimestamp, subtitle style, hook overlay, font size, logo, watermark, dan normalisasi audio
 - AI Caption: hook, caption, CTA, hashtag, dan copy sekali klik
 - Export MP4 melalui layanan FFmpeg
 - Published tracker untuk URL, views, likes, comments, shares, dan followers gained
@@ -41,7 +41,7 @@ npm run local-ai:setup
 npm run dev
 ```
 
-Setup menginstal `ollama`, `whisper-cpp`, dan `ffmpeg` melalui Homebrew, lalu mengunduh model `qwen2.5:1.5b` dan Whisper multilingual `base`. Pada penggunaan berikutnya:
+Setup menginstal `ollama`, `whisper-cpp`, `ffmpeg`, dan `yt-dlp` melalui Homebrew, lalu mengunduh model `qwen2.5:1.5b` dan Whisper multilingual `base`. Gunakan hanya video milik Anda atau video yang memang Anda berhak proses. Pada penggunaan berikutnya:
 
 ```bash
 npm run local-ai:start
