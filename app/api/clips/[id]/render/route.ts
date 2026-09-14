@@ -4,9 +4,25 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const user = await currentUser(), { id } = await params;
   const clip = await bindings.DB.prepare("SELECT clips.*,projects.storage_key FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?").bind(id,user.id).first();
   if (!clip) return jsonError("Clip tidak ditemukan",404);
-  if (!bindings.RENDER_SERVICE_URL) return jsonError("Export MP4 belum dikonfigurasi. Tambahkan RENDER_SERVICE_URL untuk menghubungkan layanan FFmpeg.",503);
+  if (!bindings.LOCAL_RENDER_BASE_URL && !bindings.RENDER_SERVICE_URL) return jsonError("Export MP4 belum dikonfigurasi. Aktifkan layanan render lokal atau tambahkan RENDER_SERVICE_URL.",503);
   await bindings.DB.prepare("UPDATE clips SET status='rendering',updated_at=? WHERE id=?").bind(Date.now(),id).run();
-  const response = await fetch(`${bindings.RENDER_SERVICE_URL}/render`, { method: "POST", headers: { "content-type": "application/json", ...(bindings.RENDER_SERVICE_TOKEN ? { authorization: `Bearer ${bindings.RENDER_SERVICE_TOKEN}` } : {}) }, body: JSON.stringify(clip) });
+  let response: Response;
+  if (bindings.LOCAL_RENDER_BASE_URL) {
+    const source = clip.storage_key ? await bindings.MEDIA.get(String(clip.storage_key)) : null;
+    if (!source) { await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run(); return jsonError("Video sumber tidak ditemukan",404); }
+    response = await fetch(`${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/render`, {
+      method: "POST",
+      headers: {
+        "content-type": source.httpMetadata?.contentType || "application/octet-stream",
+        "x-kliyu-start": String(clip.start_time),
+        "x-kliyu-end": String(clip.end_time),
+        "x-kliyu-aspect-ratio": String(clip.aspect_ratio || "9:16"),
+      },
+      body: await source.arrayBuffer(),
+    });
+  } else {
+    response = await fetch(`${bindings.RENDER_SERVICE_URL}/render`, { method: "POST", headers: { "content-type": "application/json", ...(bindings.RENDER_SERVICE_TOKEN ? { authorization: `Bearer ${bindings.RENDER_SERVICE_TOKEN}` } : {}) }, body: JSON.stringify(clip) });
+  }
   if (!response.ok) {
     await bindings.DB.prepare("UPDATE clips SET status='ready',updated_at=? WHERE id=?").bind(Date.now(),id).run();
     return jsonError(`Render service gagal (${response.status})`,502);

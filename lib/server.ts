@@ -1,8 +1,31 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 
-type AppEnv = { DB: D1Database; MEDIA: R2Bucket; OPENAI_API_KEY?: string; OPENAI_MODEL?: string; RENDER_SERVICE_URL?: string; RENDER_SERVICE_TOKEN?: string; YOUTUBE_API_KEY?: string; PUBLISH_SERVICE_URL?: string; BILLING_SERVICE_URL?: string; BILLING_SERVICE_TOKEN?: string };
+type AppEnv = {
+  DB: D1Database;
+  MEDIA: R2Bucket;
+  AI_PROVIDER?: "openai" | "ollama";
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OLLAMA_BASE_URL?: string;
+  OLLAMA_MODEL?: string;
+  WHISPER_BASE_URL?: string;
+  LOCAL_RENDER_BASE_URL?: string;
+  RENDER_SERVICE_URL?: string;
+  RENDER_SERVICE_TOKEN?: string;
+  YOUTUBE_API_KEY?: string;
+  PUBLISH_SERVICE_URL?: string;
+  BILLING_SERVICE_URL?: string;
+  BILLING_SERVICE_TOKEN?: string;
+};
 export const bindings = env as unknown as AppEnv;
+
+export function aiProvider() {
+  if (bindings.AI_PROVIDER === "ollama") return "ollama" as const;
+  if (bindings.AI_PROVIDER === "openai") return "openai" as const;
+  if (bindings.OLLAMA_BASE_URL || bindings.WHISPER_BASE_URL) return "ollama" as const;
+  return "openai" as const;
+}
 
 export async function currentUser() {
   const signedIn = await getChatGPTUser();
