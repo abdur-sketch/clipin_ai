@@ -12,6 +12,11 @@ OVERLAY_TOOL="$STATE_DIR/bin/render-text-overlay"
 if [ ! -x "$OVERLAY_TOOL" ] || [ "$OVERLAY_SOURCE" -nt "$OVERLAY_TOOL" ]; then
   xcrun swiftc "$OVERLAY_SOURCE" -o "$OVERLAY_TOOL"
 fi
+FACE_SOURCE="$PROJECT_DIR/scripts/detect-face-center.swift"
+FACE_TOOL="$STATE_DIR/bin/detect-face-center"
+if [ ! -x "$FACE_TOOL" ] || [ "$FACE_SOURCE" -nt "$FACE_TOOL" ]; then
+  xcrun swiftc -framework AVFoundation -framework Vision "$FACE_SOURCE" -o "$FACE_TOOL"
+fi
 
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama belum terpasang. Jalankan: npm run local-ai:setup"
@@ -57,7 +62,7 @@ curl --silent --fail http://127.0.0.1:8080/ >/dev/null || { echo "Whisper gagal 
 
 if ! curl --silent --fail http://127.0.0.1:8789/health >/dev/null 2>&1; then
   launchctl remove com.kliyu.render >/dev/null 2>&1 || true
-  launchctl submit -l com.kliyu.render -o "$STATE_DIR/logs/render.log" -e "$STATE_DIR/logs/render.log" -- /usr/bin/env PATH="/usr/local/bin:/usr/bin:/bin" KLIYU_OVERLAY_TOOL="$OVERLAY_TOOL" node "$PROJECT_DIR/scripts/local-render-server.mjs"
+  launchctl submit -l com.kliyu.render -o "$STATE_DIR/logs/render.log" -e "$STATE_DIR/logs/render.log" -- /usr/bin/env PATH="/usr/local/bin:/usr/bin:/bin" KLIYU_OVERLAY_TOOL="$OVERLAY_TOOL" KLIYU_FACE_TOOL="$FACE_TOOL" node "$PROJECT_DIR/scripts/local-render-server.mjs"
 fi
 
 for _ in {1..30}; do

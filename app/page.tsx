@@ -68,6 +68,10 @@ type Clip = {
   fontColor?: string;
   fontEffect?: string;
   titleEffect?: string;
+  titleAnimation?: string;
+  titlePosition?: string;
+  captionPosition?: string;
+  smartCleanup?: boolean;
   watermark?: boolean;
   captionsEnabled?: boolean;
   logoName?: string;
@@ -183,6 +187,10 @@ export default function Home() {
   const [projectTitle, setProjectTitle] = useState("My Clips");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [renderingIds, setRenderingIds] = useState<string[]>([]);
+  const [renderProgress, setRenderProgress] = useState<Record<string, number>>(
+    {},
+  );
+  const renderControllers = useRef(new Map<string, AbortController>());
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -289,6 +297,13 @@ export default function Home() {
           fontColor: String(item.font_color || "#FFFFFF"),
           fontEffect: String(item.font_effect || "outline"),
           titleEffect: String(item.title_effect || "background"),
+          titleAnimation: String(item.title_animation || "fade"),
+          titlePosition: String(item.title_position || "top"),
+          captionPosition: String(item.caption_position || "bottom"),
+          smartCleanup:
+            item.smart_cleanup === undefined
+              ? true
+              : Boolean(item.smart_cleanup),
           watermark: Boolean(item.watermark),
           logoName: item.logo_key
             ? String(item.logo_key).split("/").pop()
@@ -399,6 +414,13 @@ export default function Home() {
             fontColor: String(item.font_color || "#FFFFFF"),
             fontEffect: String(item.font_effect || "outline"),
             titleEffect: String(item.title_effect || "background"),
+            titleAnimation: String(item.title_animation || "fade"),
+            titlePosition: String(item.title_position || "top"),
+            captionPosition: String(item.caption_position || "bottom"),
+            smartCleanup:
+              item.smart_cleanup === undefined
+                ? true
+                : Boolean(item.smart_cleanup),
             watermark: Boolean(item.watermark),
             logoName: item.logo_key
               ? String(item.logo_key).split("/").pop()
@@ -438,6 +460,22 @@ export default function Home() {
     if (clip.status === "rendered" || renderingIds.includes(String(clip.id)))
       return;
     setRenderingIds((items) => [...items, String(clip.id)]);
+    const renderId = String(clip.id);
+    const controller = new AbortController();
+    renderControllers.current.set(renderId, controller);
+    setRenderProgress((items) => ({ ...items, [renderId]: 4 }));
+    const progressTimer = window.setInterval(
+      () =>
+        setRenderProgress((items) => ({
+          ...items,
+          [renderId]: Math.min(
+            92,
+            (items[renderId] || 4) +
+              Math.max(1, Math.round((95 - (items[renderId] || 4)) / 12)),
+          ),
+        })),
+      850,
+    );
     setClipItems((items) =>
       items.map((item) =>
         item.id === clip.id ? { ...item, status: "rendering" } : item,
@@ -447,6 +485,7 @@ export default function Home() {
       if (typeof clip.id === "string") {
         const response = await fetch(`/api/clips/${clip.id}/render`, {
           method: "POST",
+          signal: controller.signal,
         });
         if (!response.ok)
           throw new Error((await response.json()).error || "Render gagal");
@@ -459,16 +498,32 @@ export default function Home() {
       setToast(
         `CLIP #${String(clip.id).slice(-2).padStart(2, "0")} selesai dirender`,
       );
+      setRenderProgress((items) => ({ ...items, [renderId]: 100 }));
     } catch (error) {
       setClipItems((items) =>
         items.map((item) =>
           item.id === clip.id ? { ...item, status: "ready" } : item,
         ),
       );
-      setToast(error instanceof Error ? error.message : "Render gagal");
+      setToast(
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Render dibatalkan"
+          : error instanceof Error
+            ? error.message
+            : "Render gagal",
+      );
     } finally {
+      window.clearInterval(progressTimer);
+      renderControllers.current.delete(renderId);
       setRenderingIds((items) => items.filter((id) => id !== String(clip.id)));
     }
+  }
+  async function cancelRender(clip: Clip) {
+    const id = String(clip.id);
+    renderControllers.current.get(id)?.abort();
+    if (typeof clip.id === "string")
+      await fetch(`/api/clips/${clip.id}/render`, { method: "DELETE" });
+    setRenderProgress((items) => ({ ...items, [id]: 0 }));
   }
   async function renderAll() {
     const pending = clipItems.filter((clip) => clip.status !== "rendered");
@@ -477,7 +532,7 @@ export default function Home() {
       return;
     }
     setToast(`${pending.length} klip masuk antrean render`);
-    await Promise.all(pending.map(renderClip));
+    for (const clip of pending) await renderClip(clip);
   }
   function exportClip(clip: Clip) {
     if (typeof clip.id !== "string" || clip.status !== "rendered") {
@@ -508,7 +563,12 @@ export default function Home() {
             fontColor: updated.fontColor ?? "#FFFFFF",
             fontEffect: updated.fontEffect ?? "outline",
             titleEffect: updated.titleEffect ?? "background",
+            titleAnimation: updated.titleAnimation ?? "fade",
+            titlePosition: updated.titlePosition ?? "top",
+            captionPosition: updated.captionPosition ?? "bottom",
+            smartCleanup: updated.smartCleanup ?? true,
             watermark: updated.watermark ?? true,
+            subtitles: updated.subtitles ?? [],
           }),
         });
         if (!response.ok)
@@ -750,6 +810,8 @@ export default function Home() {
             onExport={exportClip}
             onRenderAll={renderAll}
             renderingIds={renderingIds}
+            renderProgress={renderProgress}
+            onCancelRender={cancelRender}
           />
         )}
         {view === "projects" && (
@@ -1116,6 +1178,8 @@ function ClipsPage({
   onExport,
   onRenderAll,
   renderingIds,
+  renderProgress,
+  onCancelRender,
 }: {
   projectTitle: string;
   items: Clip[];
@@ -1130,6 +1194,8 @@ function ClipsPage({
   onExport: (c: Clip) => void;
   onRenderAll: () => void;
   renderingIds: string[];
+  renderProgress: Record<string, number>;
+  onCancelRender: (clip: Clip) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const hotCount = items.filter((clip) => clip.score >= 85).length;
@@ -1293,6 +1359,8 @@ function ClipsPage({
               onRender={() => onRender(clip)}
               onExport={() => onExport(clip)}
               rendering={renderingIds.includes(String(clip.id))}
+              progress={renderProgress[String(clip.id)] || 0}
+              onCancel={() => onCancelRender(clip)}
             />
           ))}
         </div>
@@ -1315,6 +1383,8 @@ function ClipCard({
   onRender,
   onExport,
   rendering,
+  progress,
+  onCancel,
 }: {
   clip: Clip;
   onEdit: () => void;
@@ -1322,6 +1392,8 @@ function ClipCard({
   onRender: () => void;
   onExport: () => void;
   rendering: boolean;
+  progress: number;
+  onCancel: () => void;
 }) {
   return (
     <article className="clip-card">
@@ -1361,6 +1433,12 @@ function ClipCard({
         </div>
         <h3>{clip.title}</h3>
         <p>“{clip.hook}”</p>
+        {rendering && (
+          <div className="render-progress">
+            <span style={{ width: `${progress}%` }} />
+            <b>{progress}% · antrean lokal</b>
+          </div>
+        )}
         <div className="clip-actions">
           <button onClick={onEdit}>
             <Pencil /> Edit
@@ -1370,11 +1448,18 @@ function ClipCard({
           </button>
           <button
             className={`render-button ${rendering ? "is-rendering" : ""}`}
-            disabled={rendering}
-            onClick={clip.status === "rendered" ? onExport : onRender}
+            onClick={
+              rendering
+                ? onCancel
+                : clip.status === "rendered"
+                  ? onExport
+                  : onRender
+            }
           >
             {rendering || clip.status === "rendering" ? (
-              <>Rendering…</>
+              <>
+                <X /> Batalkan
+              </>
             ) : clip.status === "rendered" ? (
               <>
                 <Download /> Export MP4
@@ -2459,11 +2544,27 @@ function ClipEditor({
   const [titleEffect, setTitleEffect] = useState(
     clip.titleEffect || "background",
   );
+  const [titleAnimation, setTitleAnimation] = useState(
+    clip.titleAnimation || "fade",
+  );
+  const [titlePosition, setTitlePosition] = useState(
+    clip.titlePosition || "top",
+  );
+  const [captionPosition, setCaptionPosition] = useState(
+    clip.captionPosition || "bottom",
+  );
+  const [smartCleanup, setSmartCleanup] = useState(clip.smartCleanup ?? true);
   const [watermark, setWatermark] = useState(clip.watermark ?? true);
   const [logoName, setLogoName] = useState(clip.logoName || "");
   const studioVideoRef = useRef<HTMLVideoElement>(null);
   const [startTime, setStartTime] = useState(clip.startTime ?? 0);
   const [endTime, setEndTime] = useState(clip.endTime ?? clip.duration);
+  const [videoDuration, setVideoDuration] = useState(
+    Math.max(clip.endTime ?? clip.duration, clip.duration),
+  );
+  const [subtitleRows, setSubtitleRows] = useState(
+    (clip.subtitles || []).map((item) => ({ ...item })),
+  );
   const [postCaption, setPostCaption] = useState(clip.postCaption || ""),
     [postCta, setPostCta] = useState(clip.postCta || ""),
     [postHashtags, setPostHashtags] = useState<string[]>(
@@ -2471,10 +2572,48 @@ function ClipEditor({
     ),
     [captionBusy, setCaptionBusy] = useState(false);
   const [currentSubtitle, setCurrentSubtitle] = useState(
-    clip.subtitles?.find(
+    subtitleRows.find(
       (item) => item.start <= startTime && item.end >= startTime,
     )?.text || "",
   );
+  const builtInPresets = [
+    {
+      name: "Viral Pop",
+      fontFamily: "rounded",
+      fontColor: "#FFE066",
+      fontEffect: "outline",
+      titleEffect: "background",
+      titleAnimation: "pop",
+      style: "Karaoke",
+    },
+    {
+      name: "Clean Pro",
+      fontFamily: "system",
+      fontColor: "#FFFFFF",
+      fontEffect: "shadow",
+      titleEffect: "none",
+      titleAnimation: "fade",
+      style: "Clean",
+    },
+    {
+      name: "Neon Creator",
+      fontFamily: "condensed",
+      fontColor: "#69E8FF",
+      fontEffect: "glow",
+      titleEffect: "glow",
+      titleAnimation: "slide",
+      style: "Bold",
+    },
+  ];
+  function applyPreset(preset: (typeof builtInPresets)[number]) {
+    setFontFamily(preset.fontFamily);
+    setFontColor(preset.fontColor);
+    setFontEffect(preset.fontEffect);
+    setTitleEffect(preset.titleEffect);
+    setTitleAnimation(preset.titleAnimation);
+    setStyle(preset.style);
+    onNotice(`Preset ${preset.name} diterapkan`);
+  }
   const fontStacks: Record<string, string> = {
     system: "system-ui, sans-serif",
     rounded: "'Avenir Next', sans-serif",
@@ -2584,7 +2723,7 @@ function ClipEditor({
     const video = studioVideoRef.current;
     if (!video) return;
     setCurrentSubtitle(
-      clip.subtitles?.find(
+      subtitleRows.find(
         (item) =>
           item.start <= video.currentTime && item.end >= video.currentTime,
       )?.text || "",
@@ -2619,14 +2758,18 @@ function ClipEditor({
                 playsInline
                 preload="metadata"
                 onLoadedMetadata={() => {
-                  if (studioVideoRef.current)
+                  if (studioVideoRef.current) {
+                    setVideoDuration(
+                      studioVideoRef.current.duration || endTime,
+                    );
                     studioVideoRef.current.currentTime = startTime;
+                  }
                 }}
                 onTimeUpdate={updateStudioPlayback}
               />
               {hook && (
                 <span
-                  className={`hook-overlay font-effect-${titleEffect}`}
+                  className={`hook-overlay title-${titlePosition} title-anim-${titleAnimation} font-effect-${titleEffect}`}
                   style={titleTextStyle}
                 >
                   {hookText}
@@ -2634,7 +2777,7 @@ function ClipEditor({
               )}
               {subtitle && currentSubtitle && (
                 <div
-                  className={`editor-subtitle ${style.toLowerCase()} font-effect-${fontEffect}`}
+                  className={`editor-subtitle caption-${captionPosition} ${style.toLowerCase()} font-effect-${fontEffect}`}
                   style={{
                     ...textStyle,
                     fontSize: `${Math.round(fontSize / 3)}px`,
@@ -2657,9 +2800,50 @@ function ClipEditor({
             <div className="timeline">
               <span>{Math.round(startTime)}s</span>
               <div>
-                <i />
-                <b />
-                <i />
+                <span className="waveform" aria-hidden="true">
+                  {Array.from({ length: 32 }, (_, index) => (
+                    <i
+                      key={index}
+                      style={{ height: `${25 + ((index * 37) % 70)}%` }}
+                    />
+                  ))}
+                </span>
+                <b
+                  style={{
+                    left: `${(startTime / Math.max(1, videoDuration)) * 100}%`,
+                    right: `${100 - (endTime / Math.max(1, videoDuration)) * 100}%`,
+                  }}
+                />
+                <input
+                  aria-label="Waktu mulai"
+                  type="range"
+                  min="0"
+                  max={videoDuration}
+                  step="0.1"
+                  value={startTime}
+                  onChange={(event) => {
+                    const value = Math.min(
+                      Number(event.target.value),
+                      endTime - 0.5,
+                    );
+                    setStartTime(value);
+                    if (studioVideoRef.current)
+                      studioVideoRef.current.currentTime = value;
+                  }}
+                />
+                <input
+                  aria-label="Waktu selesai"
+                  type="range"
+                  min="0"
+                  max={videoDuration}
+                  step="0.1"
+                  value={endTime}
+                  onChange={(event) =>
+                    setEndTime(
+                      Math.max(Number(event.target.value), startTime + 0.5),
+                    )
+                  }
+                />
               </div>
               <span>{Math.round(endTime)}s</span>
             </div>
@@ -2696,6 +2880,41 @@ function ClipEditor({
                   >
                     <i className={`effect-sample ${value}`}>Tt</i>
                     {label}
+                  </button>
+                ))}
+              </div>
+            </label>
+            <div className="advanced-grid">
+              <label>
+                Animasi judul
+                <select
+                  value={titleAnimation}
+                  onChange={(event) => setTitleAnimation(event.target.value)}
+                >
+                  <option value="none">Tanpa animasi</option>
+                  <option value="fade">Fade in</option>
+                  <option value="slide">Slide down</option>
+                  <option value="pop">Pop</option>
+                </select>
+              </label>
+              <label>
+                Posisi judul
+                <select
+                  value={titlePosition}
+                  onChange={(event) => setTitlePosition(event.target.value)}
+                >
+                  <option value="top">Atas</option>
+                  <option value="center">Tengah</option>
+                  <option value="bottom">Bawah</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Preset visual
+              <div className="preset-options">
+                {builtInPresets.map((preset) => (
+                  <button key={preset.name} onClick={() => applyPreset(preset)}>
+                    {preset.name}
                   </button>
                 ))}
               </div>
@@ -2806,13 +3025,33 @@ function ClipEditor({
                 ))}
               </div>
             </label>
+            <label>
+              Posisi subtitle
+              <div className="style-options">
+                {[
+                  ["top", "Atas"],
+                  ["center", "Tengah"],
+                  ["bottom", "Bawah"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={captionPosition === value ? "active" : ""}
+                    onClick={() => setCaptionPosition(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </label>
             <div className="color-presets" aria-label="Preset warna font">
               {["#FFFFFF", "#C9FF45", "#FFE066", "#69E8FF", "#FF6B9B"].map(
                 (color) => (
                   <button
                     key={color}
                     aria-label={`Gunakan warna ${color}`}
-                    className={fontColor.toUpperCase() === color ? "active" : ""}
+                    className={
+                      fontColor.toUpperCase() === color ? "active" : ""
+                    }
                     style={{ background: color }}
                     onClick={() => setFontColor(color)}
                   />
@@ -2839,6 +3078,11 @@ function ClipEditor({
                 value={tracking}
                 setValue={setTracking}
               />
+              <Toggle
+                label="Smart cleanup"
+                value={smartCleanup}
+                setValue={setSmartCleanup}
+              />
               <Toggle label="Hook overlay" value={hook} setValue={setHook} />
               <Toggle
                 label="KLIYU watermark"
@@ -2860,6 +3104,90 @@ function ClipEditor({
                 ))}
               </div>
             </label>
+            <section className="subtitle-editor">
+              <div>
+                <span>SUBTITLE EDITOR</span>
+                <button
+                  onClick={() =>
+                    setSubtitleRows((rows) => [
+                      ...rows,
+                      {
+                        start: startTime,
+                        end: Math.min(endTime, startTime + 2.5),
+                        text: "Subtitle baru",
+                      },
+                    ])
+                  }
+                >
+                  <Plus /> Tambah
+                </button>
+              </div>
+              {subtitleRows
+                .filter((row) => row.end >= startTime && row.start <= endTime)
+                .map((row, index) => {
+                  const sourceIndex = subtitleRows.indexOf(row);
+                  return (
+                    <div
+                      className="subtitle-row"
+                      key={`${sourceIndex}-${row.start}`}
+                    >
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={row.start}
+                        aria-label={`Mulai subtitle ${index + 1}`}
+                        onChange={(event) =>
+                          setSubtitleRows((rows) =>
+                            rows.map((item, i) =>
+                              i === sourceIndex
+                                ? { ...item, start: Number(event.target.value) }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={row.end}
+                        aria-label={`Selesai subtitle ${index + 1}`}
+                        onChange={(event) =>
+                          setSubtitleRows((rows) =>
+                            rows.map((item, i) =>
+                              i === sourceIndex
+                                ? { ...item, end: Number(event.target.value) }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                      <textarea
+                        value={row.text}
+                        aria-label={`Teks subtitle ${index + 1}`}
+                        onChange={(event) =>
+                          setSubtitleRows((rows) =>
+                            rows.map((item, i) =>
+                              i === sourceIndex
+                                ? { ...item, text: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                      <button
+                        aria-label={`Hapus subtitle ${index + 1}`}
+                        onClick={() =>
+                          setSubtitleRows((rows) =>
+                            rows.filter((_, i) => i !== sourceIndex),
+                          )
+                        }
+                      >
+                        <X />
+                      </button>
+                    </div>
+                  );
+                })}
+            </section>
             <section className="ai-caption-box">
               <div>
                 <span>AI CAPTION</span>
@@ -2907,11 +3235,16 @@ function ClipEditor({
                     fontColor,
                     fontEffect,
                     titleEffect,
+                    titleAnimation,
+                    titlePosition,
+                    captionPosition,
+                    smartCleanup,
                     watermark,
                     logoName,
                     postCaption,
                     postCta,
                     postHashtags,
+                    subtitles: subtitleRows,
                   })
                 }
               >

@@ -10,7 +10,10 @@ let output = CommandLine.arguments[1]
 let width = CGFloat(Double(CommandLine.arguments[2]) ?? 640)
 let height = CGFloat(Double(CommandLine.arguments[3]) ?? 180)
 let pointSize = CGFloat(Double(CommandLine.arguments[4]) ?? 48)
-let style = CommandLine.arguments[5]
+let styleArgument = CommandLine.arguments[5]
+let styleParts = styleArgument.split(separator: ":", maxSplits: 1).map(String.init)
+let style = styleParts[0]
+let karaokeIndex = styleParts.count > 1 ? Int(styleParts[1]) : nil
 let text = CommandLine.arguments[6]
 let fontFamily = CommandLine.arguments.count > 7 ? CommandLine.arguments[7] : "system"
 let fontHex = CommandLine.arguments.count > 8 ? CommandLine.arguments[8] : "#FFFFFF"
@@ -56,10 +59,6 @@ let textColor = color(from: fontHex)
 shadow.shadowColor = fontEffect == "glow" ? textColor.withAlphaComponent(0.62) : NSColor.black.withAlphaComponent(0.9)
 shadow.shadowBlurRadius = fontEffect == "glow" ? 5 : (style == "clean" ? 2 : 5)
 shadow.shadowOffset = fontEffect == "glow" ? .zero : NSSize(width: 0, height: -2)
-if fontEffect == "background" {
-  NSColor.black.withAlphaComponent(0.72).setFill()
-  NSBezierPath(roundedRect: NSRect(x: 2, y: 2, width: width - 4, height: height - 4), xRadius: 18, yRadius: 18).fill()
-}
 var attributes: [NSAttributedString.Key: Any] = [
   .font: selectedFont(size: pointSize, heavy: style != "clean"),
   .foregroundColor: textColor,
@@ -68,8 +67,26 @@ var attributes: [NSAttributedString.Key: Any] = [
 if fontEffect == "shadow" || fontEffect == "glow" { attributes[.shadow] = shadow }
 if fontEffect == "outline" { attributes[.strokeColor] = NSColor.black; attributes[.strokeWidth] = style == "clean" ? -1 : -3 }
 if fontEffect == "glow" { attributes[.strokeColor] = textColor; attributes[.strokeWidth] = -0.5 }
-let attributed = NSAttributedString(string: text, attributes: attributes)
+let attributed = NSMutableAttributedString(string: text, attributes: attributes)
+if style == "karaoke", let karaokeIndex {
+  let expression = try? NSRegularExpression(pattern: "\\S+")
+  let matches = expression?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? []
+  if karaokeIndex >= 0 && karaokeIndex < matches.count {
+    attributed.addAttributes([
+      .foregroundColor: NSColor(calibratedRed: 0.79, green: 1.0, blue: 0.27, alpha: 1),
+      .strokeColor: NSColor.black,
+      .strokeWidth: -3,
+    ], range: matches[karaokeIndex].range)
+  }
+}
 let textRect = NSRect(x: 8, y: 8, width: width - 16, height: height - 16)
+if fontEffect == "background" {
+  let measured = attributed.boundingRect(with: textRect.size, options: [.usesLineFragmentOrigin, .usesFontLeading])
+  let boxHeight = min(height - 4, measured.height + 30)
+  let boxY = max(2, height - boxHeight - 2)
+  NSColor.black.withAlphaComponent(0.72).setFill()
+  NSBezierPath(roundedRect: NSRect(x: 2, y: boxY, width: width - 4, height: boxHeight), xRadius: 18, yRadius: 18).fill()
+}
 attributed.draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading])
 NSGraphicsContext.restoreGraphicsState()
 

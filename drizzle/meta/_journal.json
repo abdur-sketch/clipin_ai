@@ -64,6 +64,13 @@
       "when": 1789454492158,
       "tag": "0008_green_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789468941608,
+      "tag": "0009_worried_king_cobra",
+      "breakpoints": true
     }
   ]
 }
