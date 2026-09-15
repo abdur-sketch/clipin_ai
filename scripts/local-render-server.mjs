@@ -24,8 +24,8 @@ function run(command, args, timeoutMs = 0) {
   });
 }
 
-async function makeTextOverlay(path, text, width, pointSize, style = "bold", fontFamily = "system", fontColor = "#FFFFFF", fontEffect = "outline") {
-  await run(overlayTool, [path, String(Math.round(width * 0.86)), "180", String(pointSize), style, text, fontFamily, fontColor, fontEffect]);
+async function makeTextOverlay(path, text, width, pointSize, style = "bold", fontFamily = "system", fontColor = "#FFFFFF", fontEffect = "outline", overlayHeight = 180) {
+  await run(overlayTool, [path, String(Math.round(width * 0.86)), String(overlayHeight), String(pointSize), style, text, fontFamily, fontColor, fontEffect]);
 }
 
 function receive(request, limit = 2 * 1024 * 1024 * 1024) {
@@ -95,7 +95,9 @@ const server = createServer(async (request, response) => {
 
     if (config.hookOverlay && String(config.hook || "").trim()) {
       const path = join(work, "hook.png");
-      await makeTextOverlay(path, String(config.hook).trim(), width, Math.min(54, Math.max(30, Number(config.fontSize || 48))), "bold", String(config.fontFamily || "system"), String(config.fontColor || "#FFFFFF"), String(config.fontEffect || "outline"));
+      const fullHook = String(config.hook).trim();
+      const displayHook = fullHook.length > 100 ? `${fullHook.slice(0, 97).replace(/\s+\S*$/, "")}...` : fullHook;
+      await makeTextOverlay(path, displayHook, width, Math.min(44, Math.max(28, Number(config.fontSize || 48))), "bold", String(config.fontFamily || "system"), String(config.fontColor || "#FFFFFF"), String(config.titleEffect || "background"), 280);
       imageInputs.push(path);
       overlays.push({ y: Math.round(height * 0.12), from: 0, to: Math.min(5, end - start) });
     }

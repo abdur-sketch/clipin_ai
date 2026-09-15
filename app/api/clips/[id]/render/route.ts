@@ -16,7 +16,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       const logo = await bindings.MEDIA.get(String(clip.logo_key));
       if (logo) form.append("logo", new File([await logo.arrayBuffer()], "brand-logo", { type: logo.httpMetadata?.contentType || "image/png" }));
     }
-    form.append("config", JSON.stringify({ start: clip.start_time, end: clip.end_time, aspectRatio: clip.aspect_ratio || "9:16", fontSize: clip.font_size || 48, fontFamily: clip.font_family || "system", fontColor: clip.font_color || "#FFFFFF", fontEffect: clip.font_effect || "outline", style: clip.style || "bold", hook: clip.hook || "", hookOverlay: Boolean(clip.hook_overlay), captionsEnabled: Boolean(clip.captions_enabled), watermark: Boolean(clip.watermark), subtitles: JSON.parse(String(clip.subtitles || "[]")) }));
+    form.append("config", JSON.stringify({ start: clip.start_time, end: clip.end_time, aspectRatio: clip.aspect_ratio || "9:16", fontSize: clip.font_size || 48, fontFamily: clip.font_family || "system", fontColor: clip.font_color || "#FFFFFF", fontEffect: clip.font_effect || "outline", titleEffect: clip.title_effect || "background", style: clip.style || "bold", hook: clip.hook || "", hookOverlay: Boolean(clip.hook_overlay), captionsEnabled: Boolean(clip.captions_enabled), watermark: Boolean(clip.watermark), subtitles: JSON.parse(String(clip.subtitles || "[]")) }));
     response = await fetch(`${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/render`, {
       method: "POST",
       body: form,

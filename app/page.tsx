@@ -67,6 +67,7 @@ type Clip = {
   fontFamily?: string;
   fontColor?: string;
   fontEffect?: string;
+  titleEffect?: string;
   watermark?: boolean;
   captionsEnabled?: boolean;
   logoName?: string;
@@ -287,6 +288,7 @@ export default function Home() {
           fontFamily: String(item.font_family || "system"),
           fontColor: String(item.font_color || "#FFFFFF"),
           fontEffect: String(item.font_effect || "outline"),
+          titleEffect: String(item.title_effect || "background"),
           watermark: Boolean(item.watermark),
           logoName: item.logo_key
             ? String(item.logo_key).split("/").pop()
@@ -396,6 +398,7 @@ export default function Home() {
             fontFamily: String(item.font_family || "system"),
             fontColor: String(item.font_color || "#FFFFFF"),
             fontEffect: String(item.font_effect || "outline"),
+            titleEffect: String(item.title_effect || "background"),
             watermark: Boolean(item.watermark),
             logoName: item.logo_key
               ? String(item.logo_key).split("/").pop()
@@ -504,6 +507,7 @@ export default function Home() {
             fontFamily: updated.fontFamily ?? "system",
             fontColor: updated.fontColor ?? "#FFFFFF",
             fontEffect: updated.fontEffect ?? "outline",
+            titleEffect: updated.titleEffect ?? "background",
             watermark: updated.watermark ?? true,
           }),
         });
@@ -2452,6 +2456,9 @@ function ClipEditor({
   const [fontFamily, setFontFamily] = useState(clip.fontFamily || "system");
   const [fontColor, setFontColor] = useState(clip.fontColor || "#FFFFFF");
   const [fontEffect, setFontEffect] = useState(clip.fontEffect || "outline");
+  const [titleEffect, setTitleEffect] = useState(
+    clip.titleEffect || "background",
+  );
   const [watermark, setWatermark] = useState(clip.watermark ?? true);
   const [logoName, setLogoName] = useState(clip.logoName || "");
   const studioVideoRef = useRef<HTMLVideoElement>(null);
@@ -2475,18 +2482,26 @@ function ClipEditor({
     serif: "Georgia, serif",
     mono: "Menlo, monospace",
   };
+  const effectStyle = (effect: string): React.CSSProperties => ({
+    textShadow:
+      effect === "shadow"
+        ? "0 4px 6px rgba(0,0,0,.95)"
+        : effect === "outline"
+          ? "-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000"
+          : effect === "glow"
+            ? `0 0 8px ${fontColor},0 0 18px ${fontColor}`
+            : "none",
+    background: effect === "background" ? "rgba(0,0,0,.72)" : "transparent",
+  });
   const textStyle: React.CSSProperties = {
     fontFamily: fontStacks[fontFamily],
     color: fontColor,
-    textShadow:
-      fontEffect === "shadow"
-        ? "0 4px 6px rgba(0,0,0,.95)"
-        : fontEffect === "outline"
-          ? "-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000"
-          : fontEffect === "glow"
-            ? `0 0 8px ${fontColor},0 0 18px ${fontColor}`
-            : "none",
-    background: fontEffect === "background" ? "rgba(0,0,0,.72)" : "transparent",
+    ...effectStyle(fontEffect),
+  };
+  const titleTextStyle: React.CSSProperties = {
+    fontFamily: fontStacks[fontFamily],
+    color: fontColor,
+    ...effectStyle(titleEffect),
   };
   const onSave = (updated: Clip) =>
     persistClip({ ...updated, captionsEnabled: subtitle });
@@ -2611,8 +2626,8 @@ function ClipEditor({
               />
               {hook && (
                 <span
-                  className={`hook-overlay font-effect-${fontEffect}`}
-                  style={textStyle}
+                  className={`hook-overlay font-effect-${titleEffect}`}
+                  style={titleTextStyle}
                 >
                   {hookText}
                 </span>
@@ -2663,6 +2678,27 @@ function ClipEditor({
                 value={hookText}
                 onChange={(event) => setHookText(event.target.value)}
               />
+            </label>
+            <label>
+              Efek teks judul / hook
+              <div className="font-effect-options title-effect-options">
+                {[
+                  ["none", "None"],
+                  ["shadow", "Shadow"],
+                  ["outline", "Outline"],
+                  ["background", "Box"],
+                  ["glow", "Glow"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={titleEffect === value ? "active" : ""}
+                    onClick={() => setTitleEffect(value)}
+                  >
+                    <i className={`effect-sample ${value}`}>Tt</i>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </label>
             <div className="time-fields">
               <label>
@@ -2870,6 +2906,7 @@ function ClipEditor({
                     fontFamily,
                     fontColor,
                     fontEffect,
+                    titleEffect,
                     watermark,
                     logoName,
                     postCaption,

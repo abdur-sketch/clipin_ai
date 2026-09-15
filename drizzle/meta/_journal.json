@@ -57,6 +57,13 @@
       "when": 1789453082942,
       "tag": "0007_nifty_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789454492158,
+      "tag": "0008_green_khan",
+      "breakpoints": true
     }
   ]
 }

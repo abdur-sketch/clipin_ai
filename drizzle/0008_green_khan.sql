@@ -1,0 +1,1 @@
+ALTER TABLE `clips` ADD `title_effect` text DEFAULT 'background' NOT NULL;

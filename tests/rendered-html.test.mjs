@@ -66,6 +66,8 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
   assert.match(page, /studio-source-video/);
   assert.match(page, /media\?source=1/);
   for (const feature of ["Jenis font","Warna font","Efek font","Rounded","Editorial Serif","Shadow","Outline","Glow"]) assert.ok(page.includes(feature), `typography control missing ${feature}`);
+  assert.match(page,/Efek teks judul \/ hook/);
+  assert.match(page,/titleEffect/);
   for (const field of ["fontFamily","fontColor","fontEffect"]) assert.ok((page+clipApi+renderApi+localRender).includes(field), `font pipeline missing ${field}`);
   assert.match(overlay,/selectedFont/);
   assert.match(overlay,/fontHex/);
