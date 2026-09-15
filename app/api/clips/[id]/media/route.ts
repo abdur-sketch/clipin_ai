@@ -5,7 +5,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const clip = await bindings.DB.prepare("SELECT clips.rendered_key,projects.storage_key,projects.content_type FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?")
     .bind(id,user.id).first<{rendered_key?:string;storage_key?:string;content_type?:string}>();
   if (!clip) return jsonError("Clip tidak ditemukan",404);
-  const key = clip.rendered_key || clip.storage_key;
+  const sourceOnly = new URL(request.url).searchParams.get("source") === "1";
+  const key = sourceOnly ? clip.storage_key : (clip.rendered_key || clip.storage_key);
   if (!key) return jsonError("Video clip belum tersedia",404);
   const metadata = await bindings.MEDIA.head(key);
   if (!metadata) return jsonError("File video tidak ditemukan di penyimpanan",404);

@@ -62,6 +62,9 @@ test("clip workflow includes filters, real preview, persistent Studio controls, 
   assert.match(renderApi, /rendered_key/);
   assert.match(downloadApi, /content-disposition/i);
   assert.match(page, /real-clip-video/);
+  assert.match(page, /clip-card-video/);
+  assert.match(page, /studio-source-video/);
+  assert.match(page, /media\?source=1/);
   assert.match(page, /\/media/);
   assert.match(mediaApi, /content-range/);
   assert.match(mediaApi, /status:206/);
