@@ -22,7 +22,7 @@ test("local development prevents recursive Vite websocket error overlays", async
 
 test("new project accepts original files and honest direct video links", async () => {
   const [page, projectsApi, processApi] = await Promise.all([source("app/page.tsx"), source("app/api/projects/route.ts"), source("app/api/projects/[id]/process/route.ts")]);
-  assert.match(page, /onStart: \(source\?: File \| string,projectName\?:string\)/);
+  assert.match(page, /onStart:\s*\(source\?: File \| string,\s*projectName\?: string\)/);
   assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
   assert.match(page, /Link video YouTube, TikTok, Instagram/);
@@ -50,8 +50,8 @@ test("real OpenAI and local AI pipelines replace fake output", async () => {
   assert.doesNotMatch(processApi + ai, /demoMoments|clipin-demo/);
 });
 
-test("clip workflow includes filters, real preview, persistent Studio controls, render, and MP4 download", async () => {
-  const [page, clipApi, renderApi, localRender, downloadApi, mediaApi, logoApi] = await Promise.all([source("app/page.tsx"), source("app/api/clips/[id]/route.ts"), source("app/api/clips/[id]/render/route.ts"), source("scripts/local-render-server.mjs"), source("app/api/clips/[id]/download/route.ts"), source("app/api/clips/[id]/media/route.ts"), source("app/api/clips/[id]/logo/route.ts")]);
+test("clip workflow includes filters, real preview, typography controls, Studio, render, and MP4 download", async () => {
+  const [page, clipApi, renderApi, localRender, overlay, downloadApi, mediaApi, logoApi] = await Promise.all([source("app/page.tsx"), source("app/api/clips/[id]/route.ts"), source("app/api/clips/[id]/render/route.ts"), source("scripts/local-render-server.mjs"), source("scripts/render-text-overlay.swift"), source("app/api/clips/[id]/download/route.ts"), source("app/api/clips/[id]/media/route.ts"), source("app/api/clips/[id]/logo/route.ts")]);
   for (const feature of ["filter === \"hot\"", "filter === \"ready\"", "filter === \"rendered\"", "ClipPreview", "ClipEditor", "Automatic captions", "Face tracking", "Hook overlay", "KLIYU watermark", "Karaoke", "Export MP4"]) assert.ok(page.includes(feature), `missing ${feature}`);
   for (const ratio of ["9:16", "1:1", "16:9"]) assert.ok(page.includes(ratio));
   assert.match(clipApi, /status='ready',rendered_key=NULL/);
@@ -65,6 +65,10 @@ test("clip workflow includes filters, real preview, persistent Studio controls, 
   assert.match(page, /clip-card-video/);
   assert.match(page, /studio-source-video/);
   assert.match(page, /media\?source=1/);
+  for (const feature of ["Jenis font","Warna font","Efek font","Rounded","Editorial Serif","Shadow","Outline","Glow"]) assert.ok(page.includes(feature), `typography control missing ${feature}`);
+  for (const field of ["fontFamily","fontColor","fontEffect"]) assert.ok((page+clipApi+renderApi+localRender).includes(field), `font pipeline missing ${field}`);
+  assert.match(overlay,/selectedFont/);
+  assert.match(overlay,/fontHex/);
   assert.match(page, /\/media/);
   assert.match(mediaApi, /content-range/);
   assert.match(mediaApi, /status:206/);

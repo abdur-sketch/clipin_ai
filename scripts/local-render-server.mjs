@@ -24,8 +24,8 @@ function run(command, args, timeoutMs = 0) {
   });
 }
 
-async function makeTextOverlay(path, text, width, pointSize, style = "bold") {
-  await run(overlayTool, [path, String(Math.round(width * 0.86)), "180", String(pointSize), style, text]);
+async function makeTextOverlay(path, text, width, pointSize, style = "bold", fontFamily = "system", fontColor = "#FFFFFF", fontEffect = "outline") {
+  await run(overlayTool, [path, String(Math.round(width * 0.86)), "180", String(pointSize), style, text, fontFamily, fontColor, fontEffect]);
 }
 
 function receive(request, limit = 2 * 1024 * 1024 * 1024) {
@@ -95,7 +95,7 @@ const server = createServer(async (request, response) => {
 
     if (config.hookOverlay && String(config.hook || "").trim()) {
       const path = join(work, "hook.png");
-      await makeTextOverlay(path, String(config.hook).trim(), width, Math.min(54, Math.max(30, Number(config.fontSize || 48))), "bold");
+      await makeTextOverlay(path, String(config.hook).trim(), width, Math.min(54, Math.max(30, Number(config.fontSize || 48))), "bold", String(config.fontFamily || "system"), String(config.fontColor || "#FFFFFF"), String(config.fontEffect || "outline"));
       imageInputs.push(path);
       overlays.push({ y: Math.round(height * 0.12), from: 0, to: Math.min(5, end - start) });
     }
@@ -103,7 +103,7 @@ const server = createServer(async (request, response) => {
       const segments = Array.isArray(config.subtitles) ? config.subtitles.filter((segment) => Number(segment.end) > start && Number(segment.start) < end && String(segment.text || "").trim()).slice(0, 40) : [];
       for (const [index, segment] of segments.entries()) {
         const path = join(work, `subtitle-${index}.png`);
-        await makeTextOverlay(path, String(segment.text).trim(), width, Math.min(60, Math.max(24, Number(config.fontSize || 48))), String(config.style || "bold"));
+        await makeTextOverlay(path, String(segment.text).trim(), width, Math.min(60, Math.max(24, Number(config.fontSize || 48))), String(config.style || "bold"), String(config.fontFamily || "system"), String(config.fontColor || "#FFFFFF"), String(config.fontEffect || "outline"));
         imageInputs.push(path);
         overlays.push({ y: Math.round(height * 0.72), from: Math.max(0, Number(segment.start) - start), to: Math.min(end - start, Number(segment.end) - start) });
       }
