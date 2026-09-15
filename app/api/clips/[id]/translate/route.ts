@@ -5,6 +5,7 @@ import {
   currentUser,
   guardMutation,
   jsonError,
+  syncD1Record,
 } from "@/lib/server";
 
 export async function POST(
@@ -59,6 +60,7 @@ export async function POST(
     )
       .bind(JSON.stringify(translated), Date.now(), id)
       .run();
+    await syncD1Record("clips", id);
     return Response.json({ ok: true, subtitles: translated, language });
   } catch (error) {
     return jsonError(

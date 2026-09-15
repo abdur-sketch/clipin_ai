@@ -2385,7 +2385,7 @@ function SettingsPage({
             </div>
             <div className="integration-list">
               {[
-                ["database", "Database D1"],
+                ["firebase", "Firebase Firestore"],
                 ["storage", "Media Storage R2"],
                 ["transcription", "Whisper Transcription"],
                 ["momentDetection", "KLIYU Moment Detection"],

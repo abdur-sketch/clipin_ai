@@ -7,6 +7,12 @@ import {
   id,
   jsonError,
 } from "@/lib/server";
+import {
+  firebaseDelete,
+  firebaseList,
+  firebasePatch,
+  firebaseSet,
+} from "@/lib/firebase";
 
 type ProjectSource = {
   storage_key?: string;
@@ -121,6 +127,13 @@ async function ensureStoredSource(projectId: string, project: ProjectSource) {
   )
     .bind(key, contentType, Date.now(), projectId)
     .run();
+  await firebasePatch("projects", projectId, {
+    storage_key: key,
+    content_type: contentType,
+    status: "processing",
+    progress: 15,
+    updated_at: Date.now(),
+  });
   return key;
 }
 
@@ -161,6 +174,12 @@ export async function POST(
   )
     .bind(Date.now(), projectId)
     .run();
+  await firebasePatch("projects", projectId, {
+    status: "processing",
+    progress: 20,
+    error: null,
+    updated_at: Date.now(),
+  });
   try {
     const storageKey = await ensureStoredSource(projectId, project);
     if (!storageKey) throw new Error("Video sumber belum tersedia");
@@ -179,6 +198,10 @@ export async function POST(
     )
       .bind(Date.now(), projectId)
       .run();
+    await firebasePatch("projects", projectId, {
+      progress: 40,
+      updated_at: Date.now(),
+    });
     const file = new File(
       [await object.arrayBuffer()],
       project.title.replace(/[^a-z0-9]+/gi, "-") + ".mp4",
@@ -229,6 +252,10 @@ export async function POST(
     )
       .bind(Date.now(), projectId)
       .run();
+    await firebasePatch("projects", projectId, {
+      progress: 68,
+      updated_at: Date.now(),
+    });
     const performance = await bindings.DB.prepare(
       "SELECT clips.category,COUNT(*) posts,CAST(AVG(publications.views) AS INTEGER) avg_views,CAST(AVG(publications.likes+publications.shares*2) AS INTEGER) avg_engagement FROM publications JOIN clips ON clips.id=publications.clip_id WHERE publications.user_id=? AND publications.status='published' GROUP BY clips.category ORDER BY avg_views DESC LIMIT 5",
     )
@@ -278,12 +305,38 @@ export async function POST(
         now,
       ),
     ];
-    for (const moment of moments)
+    const firebaseClips: Array<{ id: string; data: Record<string, unknown> }> = [];
+    for (const moment of moments) {
+      const clipId = id("clip");
+      const clipData = {
+        project_id: projectId,
+        start_time: moment.start,
+        end_time: moment.end,
+        score: moment.score,
+        title: moment.title,
+        hook: moment.hook,
+        caption: `${moment.hook} ${moment.reason}`,
+        subtitles: JSON.stringify(
+          segments.filter(
+            (segment) =>
+              segment.end >= moment.start && segment.start <= moment.end,
+          ),
+        ),
+        reason: moment.reason,
+        category: moment.category,
+        style: subtitleStyle,
+        face_tracking: 1,
+        hook_overlay: 1,
+        status: "ready",
+        created_at: now,
+        updated_at: now,
+      };
+      firebaseClips.push({ id: clipId, data: clipData });
       statements.push(
         bindings.DB.prepare(
           "INSERT INTO clips (id,project_id,start_time,end_time,score,title,hook,caption,subtitles,reason,category,style,face_tracking,hook_overlay,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1,'ready',?,?)",
         ).bind(
-          id("clip"),
+          clipId,
           projectId,
           moment.start,
           moment.end,
@@ -304,6 +357,7 @@ export async function POST(
           now,
         ),
       );
+    }
     statements.push(
       bindings.DB.prepare(
         "UPDATE projects SET status='complete',progress=100,duration=?,updated_at=? WHERE id=?",
@@ -327,6 +381,33 @@ export async function POST(
       ),
     );
     await bindings.DB.batch(statements);
+    const oldFirebaseClips =
+      (await firebaseList<Record<string, unknown>>("clips", {
+        field: "project_id",
+        equals: projectId,
+        limit: 100,
+      })) || [];
+    await Promise.all(
+      oldFirebaseClips.map((clip) => firebaseDelete("clips", String(clip.id))),
+    );
+    await Promise.all([
+      firebaseSet("transcripts", projectId, {
+        project_id: projectId,
+        text: transcript,
+        segments: JSON.stringify(segments),
+        provider: provider === "ollama" ? "whisper.cpp-local" : "openai-whisper",
+        created_at: now,
+      }),
+      firebasePatch("projects", projectId, {
+        status: "complete",
+        progress: 100,
+        duration,
+        clip_count: moments.length,
+        error: null,
+        updated_at: now,
+      }),
+      ...firebaseClips.map((clip) => firebaseSet("clips", clip.id, clip.data)),
+    ]);
     return Response.json({ ok: true, provider, clips: moments.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Processing gagal";
@@ -335,6 +416,11 @@ export async function POST(
     )
       .bind(message, Date.now(), projectId)
       .run();
+    await firebasePatch("projects", projectId, {
+      status: "failed",
+      error: message,
+      updated_at: Date.now(),
+    });
     return jsonError(message, 500);
   }
 }

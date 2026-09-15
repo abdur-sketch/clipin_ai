@@ -1,4 +1,4 @@
-import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError, syncD1Record } from "@/lib/server";
 
 export async function GET(
   _: Request,
@@ -35,6 +35,7 @@ export async function GET(
       )
         .bind(progress, live.error || null, id)
         .run();
+      await syncD1Record("clips", id);
       return Response.json({
         status: live.status || clip.status,
         progress,
@@ -73,6 +74,7 @@ export async function DELETE(
   )
     .bind(Date.now(), id)
     .run();
+  await syncD1Record("clips", id);
   return Response.json({ ok: true, status: "ready" });
 }
 
@@ -101,6 +103,7 @@ export async function POST(
   )
     .bind(renderJobId, Date.now(), id)
     .run();
+  await syncD1Record("clips", id);
   let response: Response;
   if (bindings.LOCAL_RENDER_BASE_URL) {
     const source = clip.storage_key
@@ -112,6 +115,7 @@ export async function POST(
       )
         .bind(Date.now(), id)
         .run();
+      await syncD1Record("clips", id);
       return jsonError("Video sumber tidak ditemukan", 404);
     }
     const form = new FormData();
@@ -200,6 +204,7 @@ export async function POST(
     )
       .bind(message.slice(0, 1000), Date.now(), id)
       .run();
+    await syncD1Record("clips", id);
     return jsonError(message, 502);
   }
   const contentType = response.headers.get("content-type") || "";
@@ -210,6 +215,7 @@ export async function POST(
       )
         .bind(Date.now(), id)
         .run();
+      await syncD1Record("clips", id);
       return jsonError("Layanan render tidak mengembalikan video", 502);
     }
     const key = `exports/${user.id}/${id}.mp4`;
@@ -221,6 +227,7 @@ export async function POST(
     )
       .bind(key, Date.now(), id)
       .run();
+    await syncD1Record("clips", id);
     await bindings.DB.prepare(
       "INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)",
     )
@@ -246,6 +253,7 @@ export async function POST(
     )
       .bind(Date.now(), id)
       .run();
+    await syncD1Record("clips", id);
     return jsonError("Layanan render tidak mengembalikan file MP4", 502);
   }
   const rendered = await fetch(result.downloadUrl);
@@ -255,6 +263,7 @@ export async function POST(
     )
       .bind(Date.now(), id)
       .run();
+    await syncD1Record("clips", id);
     return jsonError("File hasil render tidak dapat diambil", 502);
   }
   const key = `exports/${user.id}/${id}.mp4`;
@@ -268,6 +277,7 @@ export async function POST(
   )
     .bind(key, Date.now(), id)
     .run();
+  await syncD1Record("clips", id);
   await bindings.DB.prepare(
     "INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)",
   )

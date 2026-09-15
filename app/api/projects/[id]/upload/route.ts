@@ -1,4 +1,5 @@
 import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
+import { firebasePatch } from "@/lib/firebase";
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -30,5 +31,12 @@ export async function PUT(
   )
     .bind(key, type, Date.now(), id)
     .run();
+  await firebasePatch("projects", id, {
+    storage_key: key,
+    content_type: type,
+    status: "uploaded",
+    progress: 15,
+    updated_at: Date.now(),
+  });
   return Response.json({ ok: true, key });
 }

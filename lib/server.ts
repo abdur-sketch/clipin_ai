@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { firebaseGet, firebaseSet } from "@/lib/firebase";
 
 type AppEnv = {
   DB: D1Database;
@@ -18,8 +19,44 @@ type AppEnv = {
   PUBLISH_SERVICE_TOKEN?: string;
   BILLING_SERVICE_URL?: string;
   BILLING_SERVICE_TOKEN?: string;
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
 };
 export const bindings = env as unknown as AppEnv;
+
+const firebaseTables = new Set([
+  "users",
+  "projects",
+  "clips",
+  "transcripts",
+  "user_settings",
+  "subscriptions",
+  "notifications",
+  "channels",
+  "posting_rules",
+  "publications",
+  "referrals",
+  "campaigns",
+  "campaign_participants",
+  "campaign_submissions",
+  "payout_requests",
+]);
+
+export async function syncD1Record(
+  table: string,
+  recordId: string,
+  idColumn = "id",
+) {
+  if (!firebaseTables.has(table) || !["id", "project_id", "user_id"].includes(idColumn))
+    throw new Error("Koleksi Firebase tidak diizinkan");
+  const row = await bindings.DB.prepare(
+    `SELECT * FROM ${table} WHERE ${idColumn}=?`,
+  )
+    .bind(recordId)
+    .first<Record<string, unknown>>();
+  if (!row) return false;
+  return firebaseSet(table, recordId, row);
+}
 
 export function aiProvider() {
   if (bindings.AI_PROVIDER === "ollama") return "ollama" as const;
@@ -39,6 +76,20 @@ export async function currentUser() {
   )
     .bind(id, email, name, Date.now())
     .run();
+  const firebaseUser = await firebaseGet<Record<string, unknown>>("users", id);
+  if (
+    !firebaseUser ||
+    firebaseUser.email !== email ||
+    firebaseUser.name !== name ||
+    firebaseUser.authenticated !== Boolean(signedIn)
+  )
+    await firebaseSet("users", id, {
+      email,
+      name,
+      authenticated: Boolean(signedIn),
+      created_at: Number(firebaseUser?.created_at || Date.now()),
+      updated_at: Date.now(),
+    });
   return { id, email, name, authenticated: Boolean(signedIn) };
 }
 

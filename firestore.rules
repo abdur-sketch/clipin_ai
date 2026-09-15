@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // KLIYU accesses Firestore only from its authenticated server API.
+    // Service-account calls use IAM and bypass these client rules.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

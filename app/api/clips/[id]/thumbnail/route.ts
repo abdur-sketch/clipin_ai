@@ -1,4 +1,4 @@
-import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError, syncD1Record } from "@/lib/server";
 
 async function ownedClip(id: string, userId: string) {
   return bindings.DB.prepare(
@@ -82,6 +82,7 @@ export async function POST(
   )
     .bind(key, Date.now(), id)
     .run();
+  await syncD1Record("clips", id);
   return Response.json({
     ok: true,
     downloadUrl: `/api/clips/${id}/thumbnail`,

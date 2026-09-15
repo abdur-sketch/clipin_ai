@@ -4,15 +4,32 @@ import {
   guardMutation,
   id,
   jsonError,
+  syncD1Record,
 } from "@/lib/server";
+import { firebaseList, firebaseSet } from "@/lib/firebase";
 
 export async function GET() {
   const user = await currentUser();
+  const firebaseProjects = await firebaseList<Record<string, unknown>>(
+    "projects",
+    { field: "user_id", equals: user.id, limit: 50 },
+  );
+  if (firebaseProjects?.length) {
+    firebaseProjects.sort(
+      (a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0),
+    );
+    return Response.json({ projects: firebaseProjects });
+  }
   const { results } = await bindings.DB.prepare(
     "SELECT p.*, (SELECT COUNT(*) FROM clips c WHERE c.project_id=p.id) clip_count FROM projects p WHERE user_id=? ORDER BY updated_at DESC LIMIT 50",
   )
     .bind(user.id)
     .all();
+  await Promise.all(
+    results.map((project) =>
+      syncD1Record("projects", String((project as { id: string }).id)),
+    ),
+  );
   return Response.json({ projects: results });
 }
 
@@ -74,6 +91,23 @@ export async function POST(request: Request) {
       now,
     )
     .run();
+  await firebaseSet("projects", projectId, {
+    user_id: user.id,
+    title: body.title.trim(),
+    filename: body.filename ?? null,
+    content_type: body.contentType ?? null,
+    storage_key: null,
+    source_url: sourceUrl,
+    source_type: sourceType,
+    duration: 0,
+    language,
+    status: "draft",
+    progress: 0,
+    error: null,
+    clip_count: 0,
+    created_at: now,
+    updated_at: now,
+  });
   return Response.json(
     {
       project: {

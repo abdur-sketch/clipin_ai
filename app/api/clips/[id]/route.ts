@@ -1,4 +1,10 @@
-import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
+import {
+  bindings,
+  currentUser,
+  guardMutation,
+  jsonError,
+  syncD1Record,
+} from "@/lib/server";
 
 export async function PATCH(
   request: Request,
@@ -151,5 +157,6 @@ export async function PATCH(
       id,
     )
     .run();
+  await syncD1Record("clips", id);
   return Response.json({ ok: true });
 }

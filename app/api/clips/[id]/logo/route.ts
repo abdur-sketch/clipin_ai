@@ -1,4 +1,4 @@
-import { bindings, currentUser, jsonError } from "@/lib/server";
+import { bindings, currentUser, jsonError, syncD1Record } from "@/lib/server";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser(), { id } = await params;
@@ -12,5 +12,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const key = `logos/${user.id}/${id}`;
   await bindings.MEDIA.put(key,request.body,{httpMetadata:{contentType}});
   await bindings.DB.prepare("UPDATE clips SET logo_key=?,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();
+  await syncD1Record("clips",id);
   return Response.json({ok:true,key});
 }

@@ -1,4 +1,11 @@
-import { bindings, currentUser, id as makeId, jsonError } from "@/lib/server";
+import { bindings, currentUser, id as makeId, jsonError, syncD1Record } from "@/lib/server";
+import {
+  firebaseDelete,
+  firebaseGet,
+  firebaseList,
+  firebasePatch,
+  firebaseSet,
+} from "@/lib/firebase";
 
 export async function GET(
   _: Request,
@@ -6,6 +13,28 @@ export async function GET(
 ) {
   const user = await currentUser(),
     { id } = await params;
+  const firebaseProject = await firebaseGet<Record<string, unknown>>(
+    "projects",
+    id,
+  );
+  if (firebaseProject && firebaseProject.user_id === user.id) {
+    const firebaseClips =
+      (await firebaseList<Record<string, unknown>>("clips", {
+        field: "project_id",
+        equals: id,
+        limit: 100,
+      })) || [];
+    firebaseClips.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    const firebaseTranscript = await firebaseGet<Record<string, unknown>>(
+      "transcripts",
+      id,
+    );
+    return Response.json({
+      project: firebaseProject,
+      clips: firebaseClips,
+      transcript: firebaseTranscript,
+    });
+  }
   const project = await bindings.DB.prepare(
     "SELECT * FROM projects WHERE id=? AND user_id=?",
   )
@@ -22,6 +51,13 @@ export async function GET(
   )
     .bind(id)
     .first();
+  await Promise.all([
+    syncD1Record("projects", id),
+    ...clips.map((clip) =>
+      syncD1Record("clips", String((clip as { id: string }).id)),
+    ),
+    ...(transcript ? [syncD1Record("transcripts", id, "project_id")] : []),
+  ]);
   return Response.json({ project, clips, transcript });
 }
 
@@ -74,17 +110,28 @@ export async function PATCH(
         now,
       )
       .run();
+    await firebaseSet("projects", newId, {
+      ...project,
+      id: newId,
+      user_id: user.id,
+      title: `${String(project.title)} Copy`,
+      storage_key: storageKey,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    });
     const clips = await bindings.DB.prepare(
       "SELECT * FROM clips WHERE project_id=?",
     )
       .bind(id)
       .all<Record<string, unknown>>();
-    for (const clip of clips.results)
+    for (const clip of clips.results) {
+      const newClipId = makeId("clip");
       await bindings.DB.prepare(
         "INSERT INTO clips (id,project_id,start_time,end_time,score,title,hook,caption,subtitles,reason,category,style,face_tracking,hook_overlay,aspect_ratio,captions_enabled,font_size,font_family,font_color,font_effect,title_effect,title_animation,title_position,caption_position,smart_cleanup,watermark,status,post_hashtags,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]',?,?)",
       )
         .bind(
-          makeId("clip"),
+          newClipId,
           newId,
           clip.start_time,
           clip.end_time,
@@ -115,6 +162,16 @@ export async function PATCH(
           now,
         )
         .run();
+      await firebaseSet("clips", newClipId, {
+        ...clip,
+        id: newClipId,
+        project_id: newId,
+        status: "ready",
+        rendered_key: null,
+        created_at: now,
+        updated_at: now,
+      });
+    }
     const transcript = await bindings.DB.prepare(
       "SELECT * FROM transcripts WHERE project_id=?",
     )
@@ -132,6 +189,12 @@ export async function PATCH(
           now,
         )
         .run();
+    if (transcript)
+      await firebaseSet("transcripts", newId, {
+        ...transcript,
+        project_id: newId,
+        created_at: now,
+      });
     return Response.json({ ok: true, id: newId });
   }
   if (!body.title?.trim()) return jsonError("Judul wajib diisi");
@@ -140,6 +203,11 @@ export async function PATCH(
   )
     .bind(body.title.trim(), Date.now(), id, user.id)
     .run();
+  if (result.meta.changes)
+    await firebasePatch("projects", id, {
+      title: body.title.trim(),
+      updated_at: Date.now(),
+    });
   return result.meta.changes
     ? Response.json({ ok: true })
     : jsonError("Project tidak ditemukan", 404);
@@ -175,5 +243,16 @@ export async function DELETE(
     ...clipFiles.results.map((x) => x.rendered_key),
   ].filter(Boolean) as string[];
   if (keys.length) await bindings.MEDIA.delete(keys);
+  const firebaseClips =
+    (await firebaseList<Record<string, unknown>>("clips", {
+      field: "project_id",
+      equals: id,
+      limit: 100,
+    })) || [];
+  await Promise.all([
+    ...firebaseClips.map((clip) => firebaseDelete("clips", String(clip.id))),
+    firebaseDelete("transcripts", id),
+    firebaseDelete("projects", id),
+  ]);
   return Response.json({ ok: true });
 }

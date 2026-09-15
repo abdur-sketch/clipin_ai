@@ -40,6 +40,28 @@ test("local development prevents recursive Vite websocket error overlays", async
   assert.match(packageJson, /start-local-ai\.sh/);
 });
 
+test("Firebase Firestore is securely connected for core creator data", async () => {
+  const [firebase, server, projects, processApi, capabilities, page, rules] =
+    await Promise.all([
+      source("lib/firebase.ts"),
+      source("lib/server.ts"),
+      source("app/api/projects/route.ts"),
+      source("app/api/projects/[id]/process/route.ts"),
+      source("app/api/capabilities/route.ts"),
+      source("app/page.tsx"),
+      source("firestore.rules"),
+    ]);
+  assert.match(firebase, /FIREBASE_SERVICE_ACCOUNT_JSON/);
+  assert.match(firebase, /RSASSA-PKCS1-v1_5/);
+  assert.match(firebase, /firestore\.googleapis\.com/);
+  assert.match(server, /syncD1Record/);
+  assert.match(projects, /firebaseList/);
+  assert.match(processApi, /firebaseSet\("transcripts"/);
+  assert.match(capabilities, /firebaseHealthcheck/);
+  assert.match(page, /Firebase Firestore/);
+  assert.match(rules, /allow read, write: if false/);
+});
+
 test("new project accepts original files and honest direct video links", async () => {
   const [page, projectsApi, processApi] = await Promise.all([
     source("app/page.tsx"),
