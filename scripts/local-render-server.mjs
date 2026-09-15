@@ -251,6 +251,62 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+  if (request.method === "POST" && request.url === "/thumbnail") {
+    const work = await mkdtemp(join(tmpdir(), "kliyu-thumbnail-"));
+    try {
+      const raw = await receive(request);
+      const formRequest = new Request("http://127.0.0.1/thumbnail", {
+        method: "POST",
+        headers: request.headers,
+        body: raw,
+      });
+      const form = await formRequest.formData();
+      const videoFile = form.get("video");
+      if (!videoFile || typeof videoFile === "string")
+        throw new Error("Video sumber tidak tersedia");
+      const input = join(work, "source-video");
+      const output = join(work, "thumbnail.jpg");
+      const config = JSON.parse(String(form.get("config") || "{}"));
+      await writeFile(input, Buffer.from(await videoFile.arrayBuffer()));
+      const ratio = String(config.aspectRatio || "9:16");
+      const [width, height] = sizes[ratio] || sizes["9:16"];
+      await run("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        String(Math.max(0, Number(config.timestamp || 0))),
+        "-i",
+        input,
+        "-frames:v",
+        "1",
+        "-vf",
+        `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+        "-q:v",
+        "2",
+        "-y",
+        output,
+      ]);
+      const image = await readFile(output);
+      response.writeHead(200, {
+        "content-type": "image/jpeg",
+        "content-length": String(image.length),
+        "cache-control": "no-store",
+      });
+      response.end(image);
+    } catch (error) {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error:
+            error instanceof Error ? error.message : "Thumbnail gagal dibuat",
+        }),
+      );
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+    return;
+  }
   if (request.method !== "POST" || request.url !== "/render") {
     response.writeHead(404).end();
     return;
@@ -277,12 +333,42 @@ const server = createServer(async (request, response) => {
     let end = Math.max(start + 0.1, Number(config.end || start + 30));
     if (config.smartCleanup)
       [start, end] = await cleanSilenceBounds(input, start, end);
+    const removalRanges =
+      config.transcriptCut && Array.isArray(config.subtitles)
+        ? config.subtitles
+            .filter((segment) => segment.removed)
+            .map((segment) => [
+              Math.max(start, Number(segment.start)),
+              Math.min(end, Number(segment.end)),
+            ])
+            .filter(
+              ([from, to]) =>
+                Number.isFinite(from) && Number.isFinite(to) && to > from,
+            )
+            .sort((a, b) => a[0] - b[0])
+        : [];
+    const removedDuration = removalRanges.reduce(
+      (total, [from, to]) => total + (to - from),
+      0,
+    );
+    const outputDuration = Math.max(0.1, end - start - removedDuration);
+    const outputTime = (absoluteTime) =>
+      Math.max(
+        0,
+        absoluteTime -
+          start -
+          removalRanges.reduce(
+            (total, [from, to]) =>
+              total + Math.max(0, Math.min(absoluteTime, to) - from),
+            0,
+          ),
+      );
     activeJob = {
       id: String(config.renderJobId || crypto.randomUUID()),
       progress: 1,
       status: "preparing",
       error: "",
-      duration: end - start,
+      duration: outputDuration,
     };
     renderJobs.set(activeJob.id, activeJob);
     const ratio = String(config.aspectRatio || "9:16");
@@ -353,6 +439,7 @@ const server = createServer(async (request, response) => {
         ? config.subtitles
             .filter(
               (segment) =>
+                !segment.removed &&
                 Number(segment.end) > start &&
                 Number(segment.start) < end &&
                 String(segment.text || "").trim(),
@@ -398,6 +485,15 @@ const server = createServer(async (request, response) => {
           : [-1];
         for (const wordIndex of variants) {
           const path = join(work, `subtitle-${imageIndex++}.png`);
+          const speakerPalette = ["#C9FF45", "#69E8FF", "#FFE066", "#FF6B9B"];
+          const speakerName = String(segment.speaker || "Speaker 1");
+          const speakerColor =
+            speakerPalette[
+              [...speakerName].reduce(
+                (total, char) => total + char.charCodeAt(0),
+                0,
+              ) % speakerPalette.length
+            ];
           await makeTextOverlay(
             path,
             text,
@@ -405,12 +501,19 @@ const server = createServer(async (request, response) => {
             Math.min(60, Math.max(24, Number(config.fontSize || 48))),
             karaoke ? `karaoke:${wordIndex}` : String(config.style || "bold"),
             String(config.fontFamily || "system"),
-            String(config.fontColor || "#FFFFFF"),
+            config.speakerColors
+              ? speakerColor
+              : String(config.fontColor || "#FFFFFF"),
             String(config.fontEffect || "outline"),
           );
           imageInputs.push(path);
-          const segmentFrom = Math.max(0, Number(segment.start) - start);
-          const segmentTo = Math.min(end - start, Number(segment.end) - start);
+          const segmentFrom = outputTime(
+            Math.max(start, Number(segment.start)),
+          );
+          const segmentTo = Math.min(
+            outputDuration,
+            outputTime(Math.min(end, Number(segment.end))),
+          );
           const wordDuration =
             (segmentTo - segmentFrom) / Math.max(1, words.length);
           const timedWord = timedWords[wordIndex];
@@ -418,12 +521,12 @@ const server = createServer(async (request, response) => {
             y: captionY,
             from: karaoke
               ? timedWord
-                ? Math.max(0, Number(timedWord.start) - start)
+                ? outputTime(Math.max(start, Number(timedWord.start)))
                 : segmentFrom + wordIndex * wordDuration
               : segmentFrom,
             to: karaoke
               ? timedWord
-                ? Math.min(end - start, Number(timedWord.end) - start)
+                ? Math.min(outputDuration, outputTime(Number(timedWord.end)))
                 : segmentFrom + (wordIndex + 1) * wordDuration
               : segmentTo,
           });
@@ -438,7 +541,7 @@ const server = createServer(async (request, response) => {
         x: Math.round(width * 0.04),
         y: Math.round(height * 0.04),
         from: 0,
-        to: end - start,
+        to: outputDuration,
       });
     }
     const logoFile = form.get("logo");
@@ -450,8 +553,24 @@ const server = createServer(async (request, response) => {
         x: Math.round(width * 0.78),
         y: Math.round(height * 0.05),
         from: 0,
-        to: end - start,
+        to: outputDuration,
         logo: true,
+      });
+    }
+    const brollFile = form.get("broll");
+    if (brollFile && typeof brollFile !== "string") {
+      const path = join(work, "broll-image");
+      await writeFile(path, Buffer.from(await brollFile.arrayBuffer()));
+      imageInputs.push(path);
+      const from = Math.min(
+        Math.max(0, Number(config.brollStart || 2)),
+        Math.max(0, outputDuration - 0.5),
+      );
+      overlays.push({
+        y: 0,
+        from,
+        to: Math.min(outputDuration, from + 3.5),
+        broll: true,
       });
     }
 
@@ -461,6 +580,8 @@ const server = createServer(async (request, response) => {
       "error",
       "-ss",
       String(start),
+      "-t",
+      String(end - start),
       "-i",
       input,
     ];
@@ -480,8 +601,19 @@ const server = createServer(async (request, response) => {
     }
     const cropX = `max(0,min(iw-ow,iw*(${tracked(1)})-ow/2))`;
     const cropY = `max(0,min(ih-oh,ih*(${tracked(2)})-oh/2))`;
+    const keepExpression = removalRanges.length
+      ? removalRanges
+          .map(
+            ([from, to]) =>
+              `between(t,${(from - start).toFixed(3)},${(to - start).toFixed(3)})`,
+          )
+          .join("+")
+      : "";
+    const videoSource = keepExpression
+      ? `[0:v]select='not(${keepExpression})',setpts=N/FRAME_RATE/TB,`
+      : "[0:v]";
     const filters = [
-      `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='${cropX}':y='${cropY}'[v0]`,
+      `${videoSource}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='${cropX}':y='${cropY}'[v0]`,
     ];
     overlays.forEach((overlay, index) => {
       const inputIndex = index + 1;
@@ -490,6 +622,12 @@ const server = createServer(async (request, response) => {
         filters.push(
           `[${inputIndex}:v]scale=${Math.round(width * 0.16)}:-1[${sourceLabel}]`,
         );
+      if (overlay.broll) {
+        sourceLabel = `broll${index}`;
+        filters.push(
+          `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[${sourceLabel}]`,
+        );
+      }
       if (overlay.animation === "fade") {
         filters.push(
           `[${sourceLabel}]fade=t=in:st=${overlay.from}:d=0.6:alpha=1[fade${index}]`,
@@ -506,17 +644,30 @@ const server = createServer(async (request, response) => {
         `[v${index}][${sourceLabel}]overlay='${x}':'${y}':enable='between(t,${overlay.from},${overlay.to})'[v${index + 1}]`,
       );
     });
+    const audioFilters = {
+      natural: "loudnorm",
+      podcast:
+        "highpass=f=80,lowpass=f=12000,acompressor=threshold=-18dB:ratio=3:attack=20:release=250,loudnorm",
+      studio:
+        "afftdn=nf=-25,highpass=f=70,lowpass=f=14000,acompressor=threshold=-20dB:ratio=4:attack=15:release=220,loudnorm",
+    };
+    const audioPreset =
+      audioFilters[config.audioPreset] || audioFilters.podcast;
+    let audioMap = "0:a?";
+    if (keepExpression) {
+      filters.push(
+        `[0:a]aselect='not(${keepExpression})',asetpts=N/SR/TB,${audioPreset}[a0]`,
+      );
+      audioMap = "[a0]";
+    }
     args.push(
-      "-t",
-      String(end - start),
       "-filter_complex",
       filters.join(";"),
       "-map",
       overlays.length ? `[v${overlays.length}]` : "[v0]",
       "-map",
-      "0:a?",
-      "-af",
-      "loudnorm",
+      audioMap,
+      ...(keepExpression ? [] : ["-af", audioPreset]),
       "-c:v",
       "libx264",
       "-preset",
@@ -527,6 +678,9 @@ const server = createServer(async (request, response) => {
       "aac",
       "-movflags",
       "+faststart",
+      "-t",
+      String(outputDuration),
+      "-shortest",
       "-progress",
       "pipe:2",
       "-nostats",

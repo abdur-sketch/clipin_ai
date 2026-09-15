@@ -131,6 +131,16 @@ export async function POST(
           }),
         );
     }
+    if (clip.broll_key) {
+      const broll = await bindings.MEDIA.get(String(clip.broll_key));
+      if (broll)
+        form.append(
+          "broll",
+          new File([await broll.arrayBuffer()], "broll-image", {
+            type: broll.httpMetadata?.contentType || "image/jpeg",
+          }),
+        );
+    }
     form.append(
       "config",
       JSON.stringify({
@@ -146,6 +156,10 @@ export async function POST(
         titlePosition: clip.title_position || "top",
         captionPosition: clip.caption_position || "bottom",
         smartCleanup: Boolean(clip.smart_cleanup),
+        transcriptCut: Boolean(clip.transcript_cut),
+        audioPreset: clip.audio_preset || "podcast",
+        speakerColors: Boolean(clip.speaker_colors),
+        brollStart: Number(clip.broll_start || 2),
         faceTracking: Boolean(clip.face_tracking),
         style: clip.style || "bold",
         hook: clip.hook || "",

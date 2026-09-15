@@ -59,6 +59,16 @@ export const clips = sqliteTable("clips", {
   smartCleanup: integer("smart_cleanup", { mode: "boolean" })
     .notNull()
     .default(true),
+  transcriptCut: integer("transcript_cut", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  audioPreset: text("audio_preset").notNull().default("podcast"),
+  speakerColors: integer("speaker_colors", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  brollKey: text("broll_key"),
+  brollStart: real("broll_start").notNull().default(2),
+  thumbnailKey: text("thumbnail_key"),
   watermark: integer("watermark", { mode: "boolean" }).notNull().default(true),
   logoKey: text("logo_key"),
   status: text("status").notNull().default("ready"),

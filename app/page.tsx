@@ -73,6 +73,11 @@ type Clip = {
   titlePosition?: string;
   captionPosition?: string;
   smartCleanup?: boolean;
+  transcriptCut?: boolean;
+  audioPreset?: string;
+  speakerColors?: boolean;
+  brollName?: string;
+  brollStart?: number;
   watermark?: boolean;
   captionsEnabled?: boolean;
   logoName?: string;
@@ -83,6 +88,8 @@ type Clip = {
     start: number;
     end: number;
     text: string;
+    speaker?: string;
+    removed?: boolean;
     words?: { start: number; end: number; word: string }[];
   }[];
 };
@@ -310,6 +317,13 @@ export default function Home() {
             item.smart_cleanup === undefined
               ? true
               : Boolean(item.smart_cleanup),
+          transcriptCut: Boolean(item.transcript_cut),
+          audioPreset: String(item.audio_preset || "podcast"),
+          speakerColors: Boolean(item.speaker_colors),
+          brollName: item.broll_key
+            ? String(item.broll_key).split("/").pop()
+            : undefined,
+          brollStart: Number(item.broll_start || 2),
           watermark: Boolean(item.watermark),
           logoName: item.logo_key
             ? String(item.logo_key).split("/").pop()
@@ -427,6 +441,13 @@ export default function Home() {
               item.smart_cleanup === undefined
                 ? true
                 : Boolean(item.smart_cleanup),
+            transcriptCut: Boolean(item.transcript_cut),
+            audioPreset: String(item.audio_preset || "podcast"),
+            speakerColors: Boolean(item.speaker_colors),
+            brollName: item.broll_key
+              ? String(item.broll_key).split("/").pop()
+              : undefined,
+            brollStart: Number(item.broll_start || 2),
             watermark: Boolean(item.watermark),
             logoName: item.logo_key
               ? String(item.logo_key).split("/").pop()
@@ -578,6 +599,10 @@ export default function Home() {
             titlePosition: updated.titlePosition ?? "top",
             captionPosition: updated.captionPosition ?? "bottom",
             smartCleanup: updated.smartCleanup ?? true,
+            transcriptCut: updated.transcriptCut ?? false,
+            audioPreset: updated.audioPreset ?? "podcast",
+            speakerColors: updated.speakerColors ?? false,
+            brollStart: updated.brollStart ?? 2,
             watermark: updated.watermark ?? true,
             subtitles: updated.subtitles ?? [],
           }),
@@ -2635,8 +2660,20 @@ function ClipEditor({
     clip.captionPosition || "bottom",
   );
   const [smartCleanup, setSmartCleanup] = useState(clip.smartCleanup ?? true);
+  const [transcriptCut, setTranscriptCut] = useState(
+    clip.transcriptCut ?? false,
+  );
+  const [audioPreset, setAudioPreset] = useState(clip.audioPreset || "podcast");
+  const [speakerColors, setSpeakerColors] = useState(
+    clip.speakerColors ?? false,
+  );
   const [watermark, setWatermark] = useState(clip.watermark ?? true);
   const [logoName, setLogoName] = useState(clip.logoName || "");
+  const [brollName, setBrollName] = useState(clip.brollName || "");
+  const [brollStart, setBrollStart] = useState(clip.brollStart ?? 2);
+  const [thumbnailBusy, setThumbnailBusy] = useState(false);
+  const [translationLanguage, setTranslationLanguage] = useState("en");
+  const [translationBusy, setTranslationBusy] = useState(false);
   const studioVideoRef = useRef<HTMLVideoElement>(null);
   const [startTime, setStartTime] = useState(clip.startTime ?? 0);
   const [endTime, setEndTime] = useState(clip.endTime ?? clip.duration);
@@ -2685,14 +2722,50 @@ function ClipEditor({
       titleAnimation: "slide",
       style: "Bold",
     },
+    {
+      name: "Documentary",
+      fontFamily: "serif",
+      fontColor: "#FFFFFF",
+      fontEffect: "shadow",
+      titleEffect: "background",
+      titleAnimation: "fade",
+      style: "Clean",
+    },
+    {
+      name: "Gaming Punch",
+      fontFamily: "condensed",
+      fontColor: "#C9FF45",
+      fontEffect: "outline",
+      titleEffect: "glow",
+      titleAnimation: "pop",
+      style: "Karaoke",
+    },
+    {
+      name: "Newsroom",
+      fontFamily: "system",
+      fontColor: "#FFFFFF",
+      fontEffect: "background",
+      titleEffect: "background",
+      titleAnimation: "slide",
+      style: "Bold",
+    },
   ];
   const activeSubtitle = subtitleRows.find(
-    (item) => item.start <= studioTime && item.end >= studioTime,
+    (item) =>
+      !item.removed && item.start <= studioTime && item.end >= studioTime,
   );
   const activeWordIndex =
     activeSubtitle?.words?.findIndex(
       (word) => word.start <= studioTime && word.end >= studioTime,
     ) ?? -1;
+  const activeSpeakerColor = speakerColors
+    ? ["#C9FF45", "#69E8FF", "#FFE066", "#FF6B9B"][
+        [...(activeSubtitle?.speaker || "Speaker 1")].reduce(
+          (total, char) => total + char.charCodeAt(0),
+          0,
+        ) % 4
+      ]
+    : fontColor;
   const historyRef = useRef<string[]>([]),
     futureRef = useRef<string[]>([]),
     restoringRef = useRef(false);
@@ -2713,6 +2786,10 @@ function ClipEditor({
     titlePosition,
     captionPosition,
     smartCleanup,
+    transcriptCut,
+    audioPreset,
+    speakerColors,
+    brollStart,
     watermark,
     startTime,
     endTime,
@@ -2750,6 +2827,10 @@ function ClipEditor({
     setTitlePosition(state.titlePosition);
     setCaptionPosition(state.captionPosition);
     setSmartCleanup(state.smartCleanup);
+    setTranscriptCut(state.transcriptCut);
+    setAudioPreset(state.audioPreset);
+    setSpeakerColors(state.speakerColors);
+    setBrollStart(state.brollStart);
     setWatermark(state.watermark);
     setStartTime(state.startTime);
     setEndTime(state.endTime);
@@ -2776,6 +2857,42 @@ function ClipEditor({
     setTitleAnimation(preset.titleAnimation);
     setStyle(preset.style);
     onNotice(`Preset ${preset.name} diterapkan`);
+  }
+  function saveBrandKit() {
+    localStorage.setItem(
+      "kliyu-brand-kit",
+      JSON.stringify({
+        fontFamily,
+        fontColor,
+        fontEffect,
+        titleEffect,
+        titleAnimation,
+        titlePosition,
+        captionPosition,
+        style,
+        watermark,
+      }),
+    );
+    onNotice("Brand Kit tersimpan di perangkat ini");
+  }
+  function applyBrandKit() {
+    const raw = localStorage.getItem("kliyu-brand-kit");
+    if (!raw) return onNotice("Simpan Brand Kit terlebih dahulu");
+    try {
+      const kit = JSON.parse(raw);
+      setFontFamily(kit.fontFamily || "system");
+      setFontColor(kit.fontColor || "#FFFFFF");
+      setFontEffect(kit.fontEffect || "outline");
+      setTitleEffect(kit.titleEffect || "background");
+      setTitleAnimation(kit.titleAnimation || "fade");
+      setTitlePosition(kit.titlePosition || "top");
+      setCaptionPosition(kit.captionPosition || "bottom");
+      setStyle(kit.style || "Bold");
+      setWatermark(kit.watermark ?? true);
+      onNotice("Brand Kit diterapkan");
+    } catch {
+      onNotice("Brand Kit tidak valid");
+    }
   }
   const fontStacks: Record<string, string> = {
     system: "system-ui, sans-serif",
@@ -2826,6 +2943,71 @@ function ClipEditor({
     } catch (error) {
       setLogoName("");
       onNotice(error instanceof Error ? error.message : "Upload logo gagal");
+    }
+  }
+  async function uploadBroll(file?: File) {
+    if (!file || typeof clip.id !== "string") return;
+    setBrollName(file.name);
+    try {
+      const response = await fetch(`/api/clips/${clip.id}/broll`, {
+        method: "PUT",
+        headers: {
+          "content-type": file.type,
+          "content-length": String(file.size),
+        },
+        body: file,
+      });
+      if (!response.ok)
+        throw new Error((await response.json()).error || "Upload B-roll gagal");
+      onNotice("B-roll berhasil ditambahkan");
+    } catch (error) {
+      setBrollName("");
+      onNotice(error instanceof Error ? error.message : "Upload B-roll gagal");
+    }
+  }
+  async function generateThumbnail() {
+    if (typeof clip.id !== "string") return;
+    setThumbnailBusy(true);
+    try {
+      const response = await fetch(`/api/clips/${clip.id}/thumbnail`, {
+        method: "POST",
+      });
+      if (!response.ok)
+        throw new Error(
+          (await response.json()).error || "Thumbnail gagal dibuat",
+        );
+      window.location.assign(`/api/clips/${clip.id}/thumbnail`);
+      onNotice("Smart thumbnail berhasil dibuat dan diunduh");
+    } catch (error) {
+      onNotice(
+        error instanceof Error ? error.message : "Thumbnail gagal dibuat",
+      );
+    } finally {
+      setThumbnailBusy(false);
+    }
+  }
+  async function translateSubtitles() {
+    if (typeof clip.id !== "string") return;
+    setTranslationBusy(true);
+    try {
+      const response = await fetch(`/api/clips/${clip.id}/translate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ language: translationLanguage }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        subtitles?: Clip["subtitles"];
+        language?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Terjemahan gagal dibuat");
+      setSubtitleRows((result.subtitles || []).map((row) => ({ ...row })));
+      onNotice(`Subtitle diterjemahkan ke ${result.language}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Terjemahan gagal");
+    } finally {
+      setTranslationBusy(false);
     }
   }
   async function generateCaption() {
@@ -2889,7 +3071,9 @@ function ClipEditor({
     setCurrentSubtitle(
       subtitleRows.find(
         (item) =>
-          item.start <= video.currentTime && item.end >= video.currentTime,
+          !item.removed &&
+          item.start <= video.currentTime &&
+          item.end >= video.currentTime,
       )?.text || "",
     );
     if (video.currentTime >= endTime) {
@@ -2947,6 +3131,7 @@ function ClipEditor({
                   className={`editor-subtitle caption-${captionPosition} ${style.toLowerCase()} font-effect-${fontEffect}`}
                   style={{
                     ...textStyle,
+                    color: activeSpeakerColor,
                     fontSize: `${Math.round(fontSize / 3)}px`,
                   }}
                 >
@@ -3125,6 +3310,31 @@ function ClipEditor({
                 ))}
               </div>
             </label>
+            <label>
+              Brand Kit
+              <div className="style-options brand-kit-actions">
+                <button onClick={saveBrandKit}>Simpan gaya</button>
+                <button onClick={applyBrandKit}>Terapkan</button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem("kliyu-brand-kit");
+                    onNotice("Brand Kit direset");
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </label>
+            <button
+              className="studio-feature-button"
+              onClick={generateThumbnail}
+              disabled={thumbnailBusy}
+            >
+              <Sparkles />
+              {thumbnailBusy
+                ? "Membuat thumbnail..."
+                : "Buat & unduh Smart Thumbnail"}
+            </button>
             <div className="time-fields">
               <label>
                 Start
@@ -3273,6 +3483,71 @@ function ClipEditor({
               />
               <span>{logoName || "Pilih PNG, JPG, atau WebP"}</span>
             </label>
+            <div className="advanced-grid">
+              <label className="logo-upload">
+                B-roll / gambar sisipan
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => uploadBroll(event.target.files?.[0])}
+                />
+                <span>{brollName || "Pilih gambar B-roll"}</span>
+              </label>
+              <label>
+                Muncul pada detik
+                <input
+                  type="number"
+                  min="0"
+                  max={Math.max(0, endTime - startTime - 1)}
+                  step="0.1"
+                  value={brollStart}
+                  onChange={(event) =>
+                    setBrollStart(Math.max(0, Number(event.target.value)))
+                  }
+                />
+              </label>
+            </div>
+            <label>
+              Peningkatan audio
+              <div className="style-options">
+                {[
+                  ["natural", "Natural"],
+                  ["podcast", "Podcast"],
+                  ["studio", "Studio AI"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={audioPreset === value ? "active" : ""}
+                    onClick={() => setAudioPreset(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </label>
+            <div className="advanced-grid">
+              <label>
+                Terjemahan subtitle AI
+                <select
+                  value={translationLanguage}
+                  onChange={(event) =>
+                    setTranslationLanguage(event.target.value)
+                  }
+                >
+                  <option value="en">English</option>
+                  <option value="ms">Bahasa Melayu</option>
+                  <option value="es">Spanish</option>
+                  <option value="ja">Japanese</option>
+                </select>
+              </label>
+              <button
+                className="studio-feature-button translation-button"
+                onClick={translateSubtitles}
+                disabled={translationBusy}
+              >
+                {translationBusy ? "Menerjemahkan..." : "Terjemahkan"}
+              </button>
+            </div>
             <div className="toggle-list">
               <Toggle
                 label="Automatic captions"
@@ -3288,6 +3563,16 @@ function ClipEditor({
                 label="Smart cleanup"
                 value={smartCleanup}
                 setValue={setSmartCleanup}
+              />
+              <Toggle
+                label="Transcript-based cuts"
+                value={transcriptCut}
+                setValue={setTranscriptCut}
+              />
+              <Toggle
+                label="Warna subtitle per speaker"
+                value={speakerColors}
+                setValue={setSpeakerColors}
               />
               <Toggle label="Hook overlay" value={hook} setValue={setHook} />
               <Toggle
@@ -3321,6 +3606,7 @@ function ClipEditor({
                         start: startTime,
                         end: Math.min(endTime, startTime + 2.5),
                         text: "Subtitle baru",
+                        speaker: "Speaker 1",
                       },
                     ])
                   }
@@ -3334,7 +3620,7 @@ function ClipEditor({
                   const sourceIndex = subtitleRows.indexOf(row);
                   return (
                     <div
-                      className="subtitle-row"
+                      className={`subtitle-row ${row.removed ? "removed" : ""}`}
                       key={`${sourceIndex}-${row.start}`}
                     >
                       <input
@@ -3380,15 +3666,37 @@ function ClipEditor({
                           )
                         }
                       />
+                      <input
+                        value={row.speaker || "Speaker 1"}
+                        aria-label={`Speaker subtitle ${index + 1}`}
+                        onChange={(event) =>
+                          setSubtitleRows((rows) =>
+                            rows.map((item, i) =>
+                              i === sourceIndex
+                                ? { ...item, speaker: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
                       <button
-                        aria-label={`Hapus subtitle ${index + 1}`}
+                        aria-label={`${row.removed ? "Pulihkan" : "Potong"} subtitle ${index + 1}`}
+                        title={
+                          row.removed
+                            ? "Pulihkan segmen"
+                            : "Tandai segmen untuk dipotong"
+                        }
                         onClick={() =>
                           setSubtitleRows((rows) =>
-                            rows.filter((_, i) => i !== sourceIndex),
+                            rows.map((item, i) =>
+                              i === sourceIndex
+                                ? { ...item, removed: !item.removed }
+                                : item,
+                            ),
                           )
                         }
                       >
-                        <X />
+                        {row.removed ? "↶" : "✂"}
                       </button>
                     </div>
                   );
@@ -3445,6 +3753,11 @@ function ClipEditor({
                     titlePosition,
                     captionPosition,
                     smartCleanup,
+                    transcriptCut,
+                    audioPreset,
+                    speakerColors,
+                    brollName,
+                    brollStart,
                     watermark,
                     logoName,
                     postCaption,

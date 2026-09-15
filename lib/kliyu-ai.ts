@@ -245,7 +245,11 @@ function stabilizeLocalMoments(
 }
 
 export async function detectMoments(
-  options: AiOptions & { transcript: string; segments: TranscriptSegment[] },
+  options: AiOptions & {
+    transcript: string;
+    segments: TranscriptSegment[];
+    performanceHint?: string;
+  },
 ): Promise<KliyuMoment[]> {
   const duration = options.segments.reduce(
     (max, segment) => Math.max(max, segment.end),
@@ -263,7 +267,11 @@ export async function detectMoments(
     ...options,
     instructions:
       "Anda adalah KLIYU AI, editor short-form berbahasa Indonesia. Pilih 6-10 momen berbeda yang benar-benar dapat berdiri sendiri. Nilai Hook Strength, Clarity, Emotion, Standalone Value, Shareability, dan Curiosity. Gunakan timestamp yang hanya ada dalam transkrip. Durasi ideal 15-60 detik. Jangan mengarang ucapan yang tidak ada di transkrip.",
-    input: `Analisis transkrip bertimestamp berikut dan temukan momen short-form terbaik:\n\n${timedTranscript.slice(0, 110000)}`,
+    input: `Analisis transkrip bertimestamp berikut dan temukan momen short-form terbaik.${
+      options.performanceHint
+        ? ` Gunakan data performa milik kreator ini hanya sebagai sinyal ranking tambahan: ${options.performanceHint}`
+        : ""
+    }\n\n${timedTranscript.slice(0, 110000)}`,
     schema: momentSchema,
     schemaName: "kliyu_moments",
   });
@@ -305,6 +313,47 @@ export type SocialCaption = {
   cta: string;
   hashtags: string[];
 };
+
+export async function translateSubtitleText(
+  options: AiOptions & {
+    language: string;
+    rows: { id: number; text: string }[];
+  },
+) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["rows"],
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "text"],
+          properties: {
+            id: { type: "integer" },
+            text: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+  const result = await structuredJson<{
+    rows: { id: number; text: string }[];
+  }>({
+    ...options,
+    instructions:
+      "Anda adalah penerjemah subtitle video. Pertahankan makna, nada bicara, nama, angka, dan urutan baris. Gunakan kalimat singkat yang natural. Jangan menambah informasi.",
+    input: `Terjemahkan semua baris ke ${options.language}:\n${JSON.stringify(options.rows)}`,
+    schema,
+    schemaName: "kliyu_subtitle_translation",
+  });
+  const translated = new Map(
+    (result.rows || []).map((row) => [Number(row.id), String(row.text).trim()]),
+  );
+  return options.rows.map((row) => translated.get(row.id) || row.text);
+}
 
 export async function generateSocialCaption(
   options: AiOptions & {

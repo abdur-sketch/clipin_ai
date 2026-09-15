@@ -262,6 +262,28 @@ test("production editor upgrades include real progress, word timing, cleanup, hi
   assert.match(migration, /render_job_id/);
 });
 
+test("advanced creator tools include transcript cuts, speaker colors, B-roll, audio presets, thumbnail, translation, and Brand Kit", async () => {
+  const [page, renderer, renderApi, migration, translation] = await Promise.all(
+    [
+      source("app/page.tsx"),
+      source("scripts/local-render-server.mjs"),
+      source("app/api/clips/[id]/render/route.ts"),
+      source("drizzle/0011_green_xorn.sql"),
+      source("app/api/clips/[id]/translate/route.ts"),
+    ],
+  );
+  assert.match(page, /Transcript-based cuts/);
+  assert.match(page, /Warna subtitle per speaker/);
+  assert.match(page, /kliyu-brand-kit/);
+  assert.match(page, /Smart Thumbnail/);
+  assert.match(renderer, /aselect=/);
+  assert.match(renderer, /audioPreset/);
+  assert.match(renderer, /brollFile/);
+  assert.match(renderApi, /clip\.broll_key/);
+  assert.match(migration, /transcript_cut/);
+  assert.match(translation, /translateSubtitleText/);
+});
+
 test("personal workspace metadata, social card, and responsive styling are present", async () => {
   const [page, css, layout] = await Promise.all([
     source("app/page.tsx"),

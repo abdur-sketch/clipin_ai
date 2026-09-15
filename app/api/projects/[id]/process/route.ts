@@ -229,6 +229,19 @@ export async function POST(
     )
       .bind(Date.now(), projectId)
       .run();
+    const performance = await bindings.DB.prepare(
+      "SELECT clips.category,COUNT(*) posts,CAST(AVG(publications.views) AS INTEGER) avg_views,CAST(AVG(publications.likes+publications.shares*2) AS INTEGER) avg_engagement FROM publications JOIN clips ON clips.id=publications.clip_id WHERE publications.user_id=? AND publications.status='published' GROUP BY clips.category ORDER BY avg_views DESC LIMIT 5",
+    )
+      .bind(user.id)
+      .all<Record<string, unknown>>();
+    const performanceHint = performance.results.length
+      ? performance.results
+          .map(
+            (row) =>
+              `${String(row.category || "umum")}: ${Number(row.posts || 0)} post, rata-rata ${Number(row.avg_views || 0)} views, engagement ${Number(row.avg_engagement || 0)}`,
+          )
+          .join("; ")
+      : undefined;
     const moments = await detectMoments({
       provider,
       apiKey: bindings.OPENAI_API_KEY,
@@ -237,6 +250,7 @@ export async function POST(
       baseUrl: bindings.OLLAMA_BASE_URL,
       transcript,
       segments,
+      performanceHint,
       safetyIdentifier: user.id,
     });
     const now = Date.now();
