@@ -1,19 +1,75 @@
-import { bindings, currentUser, jsonError } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
 
-export async function DELETE(
+export async function GET(
   _: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await currentUser(),
     { id } = await params;
+  const clip = await bindings.DB.prepare(
+    "SELECT clips.status,clips.render_job_id,clips.render_progress,clips.render_error FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
+  )
+    .bind(id, user.id)
+    .first<Record<string, unknown>>();
+  if (!clip) return jsonError("Clip tidak ditemukan", 404);
+  if (
+    clip.status === "rendering" &&
+    clip.render_job_id &&
+    bindings.LOCAL_RENDER_BASE_URL
+  ) {
+    const response = await fetch(
+      `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/progress/${clip.render_job_id}`,
+    );
+    if (response.ok) {
+      const live = (await response.json()) as {
+        progress?: number;
+        status?: string;
+        error?: string;
+      };
+      const progress = Math.max(
+        0,
+        Math.min(100, Math.round(Number(live.progress || 0))),
+      );
+      await bindings.DB.prepare(
+        "UPDATE clips SET render_progress=?,render_error=? WHERE id=?",
+      )
+        .bind(progress, live.error || null, id)
+        .run();
+      return Response.json({
+        status: live.status || clip.status,
+        progress,
+        error: live.error,
+      });
+    }
+  }
+  return Response.json({
+    status: clip.status,
+    progress: Number(clip.render_progress || 0),
+    error: clip.render_error,
+  });
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const guarded = guardMutation(request, "render-cancel");
+  if (guarded) return guarded;
+  const user = await currentUser(),
+    { id } = await params;
   const owned = await bindings.DB.prepare(
-    "SELECT clips.id FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
+    "SELECT clips.id,clips.render_job_id FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
   )
     .bind(id, user.id)
     .first();
   if (!owned) return jsonError("Clip tidak ditemukan", 404);
+  if (owned.render_job_id && bindings.LOCAL_RENDER_BASE_URL)
+    await fetch(
+      `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/progress/${owned.render_job_id}`,
+      { method: "DELETE" },
+    );
   await bindings.DB.prepare(
-    "UPDATE clips SET status='ready',updated_at=? WHERE id=?",
+    "UPDATE clips SET status='ready',render_job_id=NULL,render_progress=0,updated_at=? WHERE id=?",
   )
     .bind(Date.now(), id)
     .run();
@@ -21,9 +77,11 @@ export async function DELETE(
 }
 
 export async function POST(
-  _: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guarded = guardMutation(request, "render");
+  if (guarded) return guarded;
   const user = await currentUser(),
     { id } = await params;
   const clip = await bindings.DB.prepare(
@@ -37,10 +95,11 @@ export async function POST(
       "Export MP4 belum dikonfigurasi. Aktifkan layanan render lokal atau tambahkan RENDER_SERVICE_URL.",
       503,
     );
+  const renderJobId = `render_${crypto.randomUUID()}`;
   await bindings.DB.prepare(
-    "UPDATE clips SET status='rendering',updated_at=? WHERE id=?",
+    "UPDATE clips SET status='rendering',render_job_id=?,render_progress=1,render_error=NULL,updated_at=? WHERE id=?",
   )
-    .bind(Date.now(), id)
+    .bind(renderJobId, Date.now(), id)
     .run();
   let response: Response;
   if (bindings.LOCAL_RENDER_BASE_URL) {
@@ -94,6 +153,7 @@ export async function POST(
         captionsEnabled: Boolean(clip.captions_enabled),
         watermark: Boolean(clip.watermark),
         subtitles: JSON.parse(String(clip.subtitles || "[]")),
+        renderJobId,
       }),
     );
     response = await fetch(
@@ -116,12 +176,17 @@ export async function POST(
     });
   }
   if (!response.ok) {
+    const failure = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    const message =
+      failure.error || `Render service gagal (${response.status})`;
     await bindings.DB.prepare(
-      "UPDATE clips SET status='ready',updated_at=? WHERE id=?",
+      "UPDATE clips SET status='ready',render_job_id=NULL,render_error=?,updated_at=? WHERE id=?",
     )
-      .bind(Date.now(), id)
+      .bind(message.slice(0, 1000), Date.now(), id)
       .run();
-    return jsonError(`Render service gagal (${response.status})`, 502);
+    return jsonError(message, 502);
   }
   const contentType = response.headers.get("content-type") || "";
   if (contentType.startsWith("video/")) {
@@ -138,7 +203,7 @@ export async function POST(
       httpMetadata: { contentType },
     });
     await bindings.DB.prepare(
-      "UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?",
+      "UPDATE clips SET status='rendered',rendered_key=?,render_job_id=NULL,render_progress=100,updated_at=? WHERE id=?",
     )
       .bind(key, Date.now(), id)
       .run();
@@ -185,7 +250,7 @@ export async function POST(
     },
   });
   await bindings.DB.prepare(
-    "UPDATE clips SET status='rendered',rendered_key=?,updated_at=? WHERE id=?",
+    "UPDATE clips SET status='rendered',rendered_key=?,render_job_id=NULL,render_progress=100,updated_at=? WHERE id=?",
   )
     .bind(key, Date.now(), id)
     .run();

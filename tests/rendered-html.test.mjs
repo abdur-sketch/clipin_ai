@@ -212,6 +212,56 @@ test("advanced Studio tools persist and reach the native render pipeline", async
   assert.match(migration, /title_animation/);
 });
 
+test("production editor upgrades include real progress, word timing, cleanup, history, and project management", async () => {
+  const [
+    page,
+    processApi,
+    renderApi,
+    renderer,
+    faceTool,
+    projectsApi,
+    contentUi,
+    contentApi,
+    server,
+    migration,
+  ] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/projects/[id]/process/route.ts"),
+    source("app/api/clips/[id]/render/route.ts"),
+    source("scripts/local-render-server.mjs"),
+    source("scripts/detect-face-center.swift"),
+    source("app/api/projects/[id]/route.ts"),
+    source("app/content-os.tsx"),
+    source("app/api/content/route.ts"),
+    source("lib/server.ts"),
+    source("drizzle/0010_clean_the_leader.sql"),
+  ]);
+  for (const feature of [
+    "Undo",
+    "Redo",
+    "Safe area",
+    "Zoom",
+    "Duplicate project",
+    "Rename project",
+    "Delete project",
+  ])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(processApi, /timestamp_granularities/);
+  assert.match(processApi, /inferredWords/);
+  assert.match(renderer, /timedWords/);
+  assert.match(renderer, /silencedetect/);
+  assert.match(renderer, /out_time_ms/);
+  assert.match(renderer, /\/progress\//);
+  assert.match(faceTool, /joined\(separator: ";"\)/);
+  assert.match(renderApi, /export async function GET/);
+  assert.match(renderApi, /render_progress/);
+  assert.match(projectsApi, /duplicate/);
+  assert.match(contentUi, /Publish directly/);
+  assert.match(contentApi, /PUBLISH_SERVICE_URL/);
+  assert.match(server, /guardMutation/);
+  assert.match(migration, /render_job_id/);
+});
+
 test("personal workspace metadata, social card, and responsive styling are present", async () => {
   const [page, css, layout] = await Promise.all([
     source("app/page.tsx"),

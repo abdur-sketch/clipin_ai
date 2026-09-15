@@ -11,7 +11,7 @@ let generator = AVAssetImageGenerator(asset: asset)
 generator.appliesPreferredTrackTransform = true
 generator.requestedTimeToleranceBefore = CMTime(seconds: 0.35, preferredTimescale: 600)
 generator.requestedTimeToleranceAfter = CMTime(seconds: 0.35, preferredTimescale: 600)
-var centers: [(Double, Double)] = []
+var centers: [(Double, Double, Double)] = []
 for index in 0..<samples {
   let fraction = samples == 1 ? 0.5 : Double(index) / Double(samples - 1)
   let time = CMTime(seconds: start + (end - start) * fraction, preferredTimescale: 600)
@@ -19,11 +19,9 @@ for index in 0..<samples {
   let request = VNDetectFaceRectanglesRequest()
   try? VNImageRequestHandler(cgImage: image).perform([request])
   guard let face = request.results?.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }) else { continue }
-  centers.append((Double(face.boundingBox.midX), 1 - Double(face.boundingBox.midY)))
+  centers.append(((end - start) * fraction, Double(face.boundingBox.midX), 1 - Double(face.boundingBox.midY)))
 }
 if centers.isEmpty { print("0.5,0.5") }
 else {
-  let x = centers.map(\.0).reduce(0, +) / Double(centers.count)
-  let y = centers.map(\.1).reduce(0, +) / Double(centers.count)
-  print(String(format: "%.4f,%.4f", x, y))
+  print(centers.map { String(format: "%.3f,%.4f,%.4f", $0.0, $0.1, $0.2) }.joined(separator: ";"))
 }

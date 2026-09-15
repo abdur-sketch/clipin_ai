@@ -1,27 +1,179 @@
-import { bindings, currentUser, jsonError } from "@/lib/server";
+import { bindings, currentUser, id as makeId, jsonError } from "@/lib/server";
 
-export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await currentUser(), { id } = await params;
-  const project = await bindings.DB.prepare("SELECT * FROM projects WHERE id=? AND user_id=?").bind(id,user.id).first();
-  if (!project) return jsonError("Project tidak ditemukan",404);
-  const { results: clips } = await bindings.DB.prepare("SELECT * FROM clips WHERE project_id=? ORDER BY score DESC").bind(id).all();
-  const transcript = await bindings.DB.prepare("SELECT * FROM transcripts WHERE project_id=?").bind(id).first();
+export async function GET(
+  _: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await currentUser(),
+    { id } = await params;
+  const project = await bindings.DB.prepare(
+    "SELECT * FROM projects WHERE id=? AND user_id=?",
+  )
+    .bind(id, user.id)
+    .first();
+  if (!project) return jsonError("Project tidak ditemukan", 404);
+  const { results: clips } = await bindings.DB.prepare(
+    "SELECT * FROM clips WHERE project_id=? ORDER BY score DESC",
+  )
+    .bind(id)
+    .all();
+  const transcript = await bindings.DB.prepare(
+    "SELECT * FROM transcripts WHERE project_id=?",
+  )
+    .bind(id)
+    .first();
   return Response.json({ project, clips, transcript });
 }
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await currentUser(), { id } = await params; const body = await request.json() as { title?: string };
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await currentUser(),
+    { id } = await params;
+  const body = (await request.json()) as {
+    title?: string;
+    duplicate?: boolean;
+  };
+  if (body.duplicate) {
+    const project = await bindings.DB.prepare(
+      "SELECT * FROM projects WHERE id=? AND user_id=?",
+    )
+      .bind(id, user.id)
+      .first<Record<string, unknown>>();
+    if (!project) return jsonError("Project tidak ditemukan", 404);
+    const newId = makeId("prj"),
+      now = Date.now();
+    let storageKey = project.storage_key ? `uploads/${newId}/source` : null;
+    if (project.storage_key) {
+      const source = await bindings.MEDIA.get(String(project.storage_key));
+      if (source)
+        await bindings.MEDIA.put(storageKey!, source.body, {
+          httpMetadata: source.httpMetadata,
+        });
+      else storageKey = null;
+    }
+    await bindings.DB.prepare(
+      "INSERT INTO projects (id,user_id,title,filename,content_type,storage_key,source_url,source_type,duration,language,status,progress,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+      .bind(
+        newId,
+        user.id,
+        `${String(project.title)} Copy`,
+        project.filename,
+        project.content_type,
+        storageKey,
+        project.source_url,
+        project.source_type,
+        project.duration,
+        project.language,
+        project.status,
+        project.progress,
+        null,
+        now,
+        now,
+      )
+      .run();
+    const clips = await bindings.DB.prepare(
+      "SELECT * FROM clips WHERE project_id=?",
+    )
+      .bind(id)
+      .all<Record<string, unknown>>();
+    for (const clip of clips.results)
+      await bindings.DB.prepare(
+        "INSERT INTO clips (id,project_id,start_time,end_time,score,title,hook,caption,subtitles,reason,category,style,face_tracking,hook_overlay,aspect_ratio,captions_enabled,font_size,font_family,font_color,font_effect,title_effect,title_animation,title_position,caption_position,smart_cleanup,watermark,status,post_hashtags,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]',?,?)",
+      )
+        .bind(
+          makeId("clip"),
+          newId,
+          clip.start_time,
+          clip.end_time,
+          clip.score,
+          clip.title,
+          clip.hook,
+          clip.caption,
+          clip.subtitles,
+          clip.reason,
+          clip.category,
+          clip.style,
+          clip.face_tracking,
+          clip.hook_overlay,
+          clip.aspect_ratio,
+          clip.captions_enabled,
+          clip.font_size,
+          clip.font_family,
+          clip.font_color,
+          clip.font_effect,
+          clip.title_effect,
+          clip.title_animation,
+          clip.title_position,
+          clip.caption_position,
+          clip.smart_cleanup,
+          clip.watermark,
+          "ready",
+          now,
+          now,
+        )
+        .run();
+    const transcript = await bindings.DB.prepare(
+      "SELECT * FROM transcripts WHERE project_id=?",
+    )
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (transcript)
+      await bindings.DB.prepare(
+        "INSERT INTO transcripts (project_id,text,segments,provider,created_at) VALUES (?,?,?,?,?)",
+      )
+        .bind(
+          newId,
+          transcript.text,
+          transcript.segments,
+          transcript.provider,
+          now,
+        )
+        .run();
+    return Response.json({ ok: true, id: newId });
+  }
   if (!body.title?.trim()) return jsonError("Judul wajib diisi");
-  const result = await bindings.DB.prepare("UPDATE projects SET title=?,updated_at=? WHERE id=? AND user_id=?").bind(body.title.trim(),Date.now(),id,user.id).run();
-  return result.meta.changes ? Response.json({ ok:true }) : jsonError("Project tidak ditemukan",404);
+  const result = await bindings.DB.prepare(
+    "UPDATE projects SET title=?,updated_at=? WHERE id=? AND user_id=?",
+  )
+    .bind(body.title.trim(), Date.now(), id, user.id)
+    .run();
+  return result.meta.changes
+    ? Response.json({ ok: true })
+    : jsonError("Project tidak ditemukan", 404);
 }
 
-export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await currentUser(), { id } = await params;
-  const project = await bindings.DB.prepare("SELECT storage_key,rendered_key FROM projects LEFT JOIN clips ON clips.project_id=projects.id WHERE projects.id=? AND user_id=?").bind(id,user.id).first<{storage_key?:string;rendered_key?:string}>();
-  if (!project) return jsonError("Project tidak ditemukan",404);
-  const clipFiles = await bindings.DB.prepare("SELECT rendered_key FROM clips WHERE project_id=? AND rendered_key IS NOT NULL").bind(id).all<{rendered_key:string}>();
-  await bindings.DB.batch([bindings.DB.prepare("DELETE FROM clips WHERE project_id=?").bind(id),bindings.DB.prepare("DELETE FROM transcripts WHERE project_id=?").bind(id),bindings.DB.prepare("DELETE FROM projects WHERE id=? AND user_id=?").bind(id,user.id)]);
-  const keys=[project.storage_key,...clipFiles.results.map(x=>x.rendered_key)].filter(Boolean) as string[]; if(keys.length) await bindings.MEDIA.delete(keys);
-  return Response.json({ ok:true });
+export async function DELETE(
+  _: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await currentUser(),
+    { id } = await params;
+  const project = await bindings.DB.prepare(
+    "SELECT storage_key,rendered_key FROM projects LEFT JOIN clips ON clips.project_id=projects.id WHERE projects.id=? AND user_id=?",
+  )
+    .bind(id, user.id)
+    .first<{ storage_key?: string; rendered_key?: string }>();
+  if (!project) return jsonError("Project tidak ditemukan", 404);
+  const clipFiles = await bindings.DB.prepare(
+    "SELECT rendered_key FROM clips WHERE project_id=? AND rendered_key IS NOT NULL",
+  )
+    .bind(id)
+    .all<{ rendered_key: string }>();
+  await bindings.DB.batch([
+    bindings.DB.prepare("DELETE FROM clips WHERE project_id=?").bind(id),
+    bindings.DB.prepare("DELETE FROM transcripts WHERE project_id=?").bind(id),
+    bindings.DB.prepare("DELETE FROM projects WHERE id=? AND user_id=?").bind(
+      id,
+      user.id,
+    ),
+  ]);
+  const keys = [
+    project.storage_key,
+    ...clipFiles.results.map((x) => x.rendered_key),
+  ].filter(Boolean) as string[];
+  if (keys.length) await bindings.MEDIA.delete(keys);
+  return Response.json({ ok: true });
 }

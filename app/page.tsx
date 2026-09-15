@@ -33,6 +33,7 @@ import {
   Share2,
   Sparkles,
   TrendingUp,
+  Trash2,
   UploadCloud,
   WandSparkles,
   X,
@@ -78,7 +79,12 @@ type Clip = {
   postCaption?: string;
   postCta?: string;
   postHashtags?: string[];
-  subtitles?: { start: number; end: number; text: string }[];
+  subtitles?: {
+    start: number;
+    end: number;
+    text: string;
+    words?: { start: number; end: number; word: string }[];
+  }[];
 };
 
 const demoClips: Clip[] = [
@@ -464,18 +470,23 @@ export default function Home() {
     const controller = new AbortController();
     renderControllers.current.set(renderId, controller);
     setRenderProgress((items) => ({ ...items, [renderId]: 4 }));
-    const progressTimer = window.setInterval(
-      () =>
-        setRenderProgress((items) => ({
-          ...items,
-          [renderId]: Math.min(
-            92,
-            (items[renderId] || 4) +
-              Math.max(1, Math.round((95 - (items[renderId] || 4)) / 12)),
-          ),
-        })),
-      850,
-    );
+    const progressTimer = window.setInterval(async () => {
+      if (typeof clip.id !== "string") return;
+      try {
+        const response = await fetch(`/api/clips/${clip.id}/render`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const result = (await response.json()) as { progress?: number };
+        if (Number.isFinite(result.progress))
+          setRenderProgress((items) => ({
+            ...items,
+            [renderId]: Math.max(items[renderId] || 0, Number(result.progress)),
+          }));
+      } catch {
+        /* render request remains authoritative */
+      }
+    }, 850);
     setClipItems((items) =>
       items.map((item) =>
         item.id === clip.id ? { ...item, status: "rendering" } : item,
@@ -819,6 +830,8 @@ export default function Home() {
             projects={projects}
             onOpen={openProject}
             onUpload={() => setUploadOpen(true)}
+            onChanged={loadProjects}
+            onNotice={setToast}
           />
         )}
         {(view === "published" ||
@@ -1600,11 +1613,52 @@ function ProjectsPage({
   projects,
   onOpen,
   onUpload,
+  onChanged,
+  onNotice,
 }: {
   projects: ProjectSummary[];
   onOpen: (id: string) => void;
   onUpload: () => void;
+  onChanged: () => Promise<void>;
+  onNotice: (message: string) => void;
 }) {
+  async function renameProject(project: ProjectSummary) {
+    const title = window.prompt("Nama project baru", project.title)?.trim();
+    if (!title || title === project.title) return;
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok)
+      return onNotice((await response.json()).error || "Rename gagal");
+    await onChanged();
+    onNotice("Nama project diperbarui");
+  }
+  async function duplicateProject(project: ProjectSummary) {
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ duplicate: true }),
+    });
+    if (!response.ok)
+      return onNotice((await response.json()).error || "Duplikasi gagal");
+    await onChanged();
+    onNotice("Project berhasil diduplikasi");
+  }
+  async function deleteProject(project: ProjectSummary) {
+    if (
+      !window.confirm(`Hapus project “${project.title}” beserta semua klipnya?`)
+    )
+      return;
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok)
+      return onNotice((await response.json()).error || "Hapus gagal");
+    await onChanged();
+    onNotice("Project berhasil dihapus");
+  }
   return (
     <div className="page projects-page">
       <div className="simple-heading">
@@ -1629,10 +1683,13 @@ function ProjectsPage({
             <span />
           </div>
           {projects.map((project, index) => (
-            <button
+            <div
               className="table-row"
               key={project.id}
               onClick={() => onOpen(project.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => event.key === "Enter" && onOpen(project.id)}
             >
               <span className="project-cell">
                 <i className={`table-thumb thumb-${(index % 3) + 1}`} />
@@ -1650,10 +1707,31 @@ function ProjectsPage({
               </span>
               <span>{project.clip_count || 0} clips</span>
               <span>{project.progress || 0}%</span>
-              <span>
-                <ArrowRight />
+              <span
+                className="project-row-actions"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  aria-label="Rename project"
+                  onClick={() => renameProject(project)}
+                >
+                  <Pencil />
+                </button>
+                <button
+                  aria-label="Duplicate project"
+                  onClick={() => duplicateProject(project)}
+                >
+                  <Copy />
+                </button>
+                <button
+                  className="danger"
+                  aria-label="Delete project"
+                  onClick={() => deleteProject(project)}
+                >
+                  <Trash2 />
+                </button>
               </span>
-            </button>
+            </div>
           ))}
         </div>
       ) : (
@@ -2536,6 +2614,9 @@ function ClipEditor({
     clip.style ? clip.style[0].toUpperCase() + clip.style.slice(1) : "Bold",
   );
   const [playing, setPlaying] = useState(false);
+  const [studioTime, setStudioTime] = useState(clip.startTime ?? 0);
+  const [safeArea, setSafeArea] = useState(true);
+  const [timelineZoom, setTimelineZoom] = useState(1);
   const [ratio, setRatio] = useState(clip.aspectRatio || "9:16");
   const [fontSize, setFontSize] = useState(clip.fontSize || 48);
   const [fontFamily, setFontFamily] = useState(clip.fontFamily || "system");
@@ -2605,6 +2686,88 @@ function ClipEditor({
       style: "Bold",
     },
   ];
+  const activeSubtitle = subtitleRows.find(
+    (item) => item.start <= studioTime && item.end >= studioTime,
+  );
+  const activeWordIndex =
+    activeSubtitle?.words?.findIndex(
+      (word) => word.start <= studioTime && word.end >= studioTime,
+    ) ?? -1;
+  const historyRef = useRef<string[]>([]),
+    futureRef = useRef<string[]>([]),
+    restoringRef = useRef(false);
+  const studioSnapshot = JSON.stringify({
+    title,
+    hookText,
+    subtitle,
+    tracking,
+    hook,
+    style,
+    ratio,
+    fontSize,
+    fontFamily,
+    fontColor,
+    fontEffect,
+    titleEffect,
+    titleAnimation,
+    titlePosition,
+    captionPosition,
+    smartCleanup,
+    watermark,
+    startTime,
+    endTime,
+    subtitleRows,
+  });
+  useEffect(() => {
+    if (restoringRef.current) {
+      restoringRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (historyRef.current.at(-1) !== studioSnapshot)
+        historyRef.current.push(studioSnapshot);
+      if (historyRef.current.length > 40) historyRef.current.shift();
+      futureRef.current = [];
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [studioSnapshot]);
+  function restoreStudio(value: string) {
+    const state = JSON.parse(value);
+    restoringRef.current = true;
+    setTitle(state.title);
+    setHookText(state.hookText);
+    setSubtitle(state.subtitle);
+    setTracking(state.tracking);
+    setHook(state.hook);
+    setStyle(state.style);
+    setRatio(state.ratio);
+    setFontSize(state.fontSize);
+    setFontFamily(state.fontFamily);
+    setFontColor(state.fontColor);
+    setFontEffect(state.fontEffect);
+    setTitleEffect(state.titleEffect);
+    setTitleAnimation(state.titleAnimation);
+    setTitlePosition(state.titlePosition);
+    setCaptionPosition(state.captionPosition);
+    setSmartCleanup(state.smartCleanup);
+    setWatermark(state.watermark);
+    setStartTime(state.startTime);
+    setEndTime(state.endTime);
+    setSubtitleRows(state.subtitleRows);
+  }
+  function undoStudio() {
+    if (historyRef.current.length < 2)
+      return onNotice("Belum ada perubahan untuk dibatalkan");
+    const current = historyRef.current.pop();
+    if (current) futureRef.current.push(current);
+    restoreStudio(historyRef.current.at(-1)!);
+  }
+  function redoStudio() {
+    const next = futureRef.current.pop();
+    if (!next) return onNotice("Belum ada perubahan untuk diulangi");
+    historyRef.current.push(next);
+    restoreStudio(next);
+  }
   function applyPreset(preset: (typeof builtInPresets)[number]) {
     setFontFamily(preset.fontFamily);
     setFontColor(preset.fontColor);
@@ -2709,6 +2872,7 @@ function ClipEditor({
   function toggleStudioPlayback() {
     const video = studioVideoRef.current;
     if (!video) return;
+    setStudioTime(video.currentTime);
     if (video.paused) {
       if (video.currentTime < startTime || video.currentTime >= endTime)
         video.currentTime = startTime;
@@ -2751,6 +2915,9 @@ function ClipEditor({
         <div className="editor-layout">
           <div className="editor-preview">
             <div className={`phone-preview ratio-${ratio.replace(":", "-")}`}>
+              {safeArea && (
+                <span className="platform-safe-area" aria-hidden="true" />
+              )}
               <video
                 ref={studioVideoRef}
                 className="studio-source-video"
@@ -2783,7 +2950,18 @@ function ClipEditor({
                     fontSize: `${Math.round(fontSize / 3)}px`,
                   }}
                 >
-                  {currentSubtitle}
+                  {style === "Karaoke" && activeSubtitle?.words?.length
+                    ? activeSubtitle.words.map((word, index) => (
+                        <span
+                          key={`${word.start}-${index}`}
+                          className={
+                            index === activeWordIndex ? "active-word" : ""
+                          }
+                        >
+                          {word.word}{" "}
+                        </span>
+                      ))
+                    : currentSubtitle}
                 </div>
               )}
               {watermark && <span className="studio-watermark">KLIYU.</span>}
@@ -2799,7 +2977,12 @@ function ClipEditor({
             </div>
             <div className="timeline">
               <span>{Math.round(startTime)}s</span>
-              <div>
+              <div
+                style={{
+                  transform: `scaleX(${timelineZoom})`,
+                  transformOrigin: "center",
+                }}
+              >
                 <span className="waveform" aria-hidden="true">
                   {Array.from({ length: 32 }, (_, index) => (
                     <i
@@ -2846,6 +3029,29 @@ function ClipEditor({
                 />
               </div>
               <span>{Math.round(endTime)}s</span>
+            </div>
+            <div className="studio-toolbar">
+              <button onClick={undoStudio}>Undo</button>
+              <button onClick={redoStudio}>Redo</button>
+              <button
+                className={safeArea ? "active" : ""}
+                onClick={() => setSafeArea(!safeArea)}
+              >
+                Safe area
+              </button>
+              <label>
+                Zoom{" "}
+                <input
+                  type="range"
+                  min="1"
+                  max="2.5"
+                  step=".1"
+                  value={timelineZoom}
+                  onChange={(event) =>
+                    setTimelineZoom(Number(event.target.value))
+                  }
+                />
+              </label>
             </div>
           </div>
           <div className="editor-controls">

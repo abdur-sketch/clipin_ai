@@ -6,12 +6,14 @@
 
 - Personal workspace dengan Sign in with ChatGPT
 - Upload MP4/MOV, impor file video publik, atau ambil video milik Anda dari YouTube/Instagram/TikTok pada mode lokal
-- Transkripsi bertimestamp melalui OpenAI Whisper atau whisper.cpp lokal
+- Transkripsi bertimestamp per kata melalui OpenAI Whisper atau estimasi berbobot dari whisper.cpp lokal
 - Kliyu AI moment detection memakai OpenAI Responses API atau Ollama lokal dengan structured output
 - My Clips: All, Hot, Ready, Exported
-- Kliyu Studio: trim, rasio 9:16/1:1/16:9, burn-in captions bertimestamp, subtitle style, hook overlay, font size, logo, watermark, dan normalisasi audio
+- Kliyu Studio: timeline dua-handle, Undo/Redo, zoom, safe area, editor subtitle, Karaoke per kata, preset visual, animasi judul, smart silence cleanup, dan tracking wajah bergerak
 - AI Caption: hook, caption, CTA, hashtag, dan copy sekali klik
-- Export MP4 melalui layanan FFmpeg
+- Export MP4 melalui antrean FFmpeg dengan progress aktual, cancel, retry, H.264/AAC, dan normalisasi audio
+- Manajemen project: rename, duplicate, dan delete beserta aset terkait
+- Publikasi manual atau langsung melalui adapter OAuth eksternal
 - Published tracker untuk URL, views, likes, comments, shares, dan followers gained
 - Content Analytics untuk kategori, durasi, dan jam posting terbaik
 - Monetization dashboard untuk platform revenue, affiliate, produk digital, dan client
@@ -63,6 +65,10 @@ Untuk deployment produksi, `RENDER_SERVICE_URL` menunjuk ke layanan media ekster
 - JSON `{ "downloadUrl": "https://.../result.mp4" }`.
 
 Jika integrasi belum tersedia, API KLIYU mengembalikan error konfigurasi yang jelas dan tidak membuat hasil demo palsu. Setelah mengubah `db/schema.ts`, buat migration dengan `npm run db:generate`.
+
+Publikasi langsung memakai `PUBLISH_SERVICE_URL` dan opsional `PUBLISH_SERVICE_TOKEN`. Adapter menerima `POST /publish` berupa multipart (`video`, `platform`, `caption`) dan mengembalikan `{ "externalUrl": "https://..." }`. Token OAuth YouTube, TikTok, Instagram, atau Facebook disimpan di adapter tersebut—bukan di browser KLIYU.
+
+Semua endpoint mutasi utama memeriksa same-origin dan memakai rate limit dasar. Untuk produksi berskala besar, letakkan layanan render/publish di belakang autentikasi, rate limiting persisten, antrean job, serta observability milik provider.
 
 ## Storage dan authentication
 

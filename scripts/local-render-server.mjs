@@ -11,19 +11,38 @@ const overlayTool =
 const faceTool =
   process.env.KLIYU_FACE_TOOL || ".local-ai/bin/detect-face-center";
 const sizes = { "9:16": [720, 1280], "1:1": [720, 720], "16:9": [1280, 720] };
+const renderJobs = new Map();
+const renderProcesses = new Map();
 
-function run(command, args, timeoutMs = 0) {
+function run(command, args, timeoutMs = 0, job) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+    if (job) renderProcesses.set(job.id, child);
     let error = "";
     const timer = timeoutMs
       ? setTimeout(() => child.kill("SIGTERM"), timeoutMs)
       : null;
     child.stderr.on("data", (chunk) => {
-      error += chunk.toString();
+      const value = chunk.toString();
+      error += value;
+      if (job && !job.cancelled) {
+        const matches = [...value.matchAll(/out_time_ms=(\d+)/g)];
+        const microseconds = Number(matches.at(-1)?.[1] || 0);
+        if (microseconds) {
+          job.progress = Math.min(
+            98,
+            Math.max(
+              job.progress,
+              Math.round((microseconds / 1_000_000 / job.duration) * 100),
+            ),
+          );
+          job.status = "rendering";
+        }
+      }
     });
     child.on("error", reject);
     child.on("close", (code) => {
+      if (job) renderProcesses.delete(job.id);
       if (timer) clearTimeout(timer);
       if (code === 0) resolve();
       else
@@ -52,6 +71,67 @@ function runOutput(command, args, timeoutMs = 0) {
       resolve(output.trim());
     });
   });
+}
+
+function runErrorOutput(command, args, timeoutMs = 0) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let output = "";
+    const timer = timeoutMs
+      ? setTimeout(() => child.kill("SIGTERM"), timeoutMs)
+      : null;
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.on("error", () => resolve(""));
+    child.on("close", () => {
+      if (timer) clearTimeout(timer);
+      resolve(output);
+    });
+  });
+}
+
+async function cleanSilenceBounds(input, start, end) {
+  const report = await runErrorOutput(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-ss",
+      String(start),
+      "-t",
+      String(end - start),
+      "-i",
+      input,
+      "-af",
+      "silencedetect=noise=-38dB:d=0.35",
+      "-f",
+      "null",
+      "-",
+    ],
+    45000,
+  );
+  const starts = [...report.matchAll(/silence_start: ([\d.]+)/g)].map((item) =>
+    Number(item[1]),
+  );
+  const ends = [...report.matchAll(/silence_end: ([\d.]+)/g)].map((item) =>
+    Number(item[1]),
+  );
+  let cleanedStart = start,
+    cleanedEnd = end;
+  if (
+    starts[0] !== undefined &&
+    starts[0] < 0.15 &&
+    ends[0] > 0.1 &&
+    ends[0] < 2.5
+  )
+    cleanedStart += ends[0];
+  const lastStart = starts.at(-1),
+    duration = end - start;
+  if (lastStart !== undefined && lastStart > duration - 2.5)
+    cleanedEnd = start + lastStart;
+  return cleanedEnd - cleanedStart >= 3
+    ? [cleanedStart, cleanedEnd]
+    : [start, end];
 }
 
 async function makeTextOverlay(
@@ -96,6 +176,27 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end('{"ok":true}');
+    return;
+  }
+  if (request.url?.startsWith("/progress/")) {
+    const id = decodeURIComponent(request.url.slice("/progress/".length));
+    const job = renderJobs.get(id);
+    if (!job) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end('{"error":"Job tidak ditemukan"}');
+      return;
+    }
+    if (request.method === "DELETE") {
+      renderProcesses.get(id)?.kill("SIGTERM");
+      job.cancelled = true;
+      job.status = "cancelled";
+      job.error = "Render dibatalkan";
+    }
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    });
+    response.end(JSON.stringify(job));
     return;
   }
   if (request.method === "POST" && request.url === "/import") {
@@ -156,6 +257,7 @@ const server = createServer(async (request, response) => {
   }
 
   const work = await mkdtemp(join(tmpdir(), "kliyu-render-"));
+  let activeJob;
   try {
     const input = join(work, "source-video");
     const output = join(work, "clip.mp4");
@@ -171,24 +273,46 @@ const server = createServer(async (request, response) => {
       throw new Error("Video sumber tidak tersedia");
     await writeFile(input, Buffer.from(await videoFile.arrayBuffer()));
     const config = JSON.parse(String(form.get("config") || "{}"));
-    const start = Math.max(0, Number(config.start || 0));
-    const end = Math.max(start + 0.1, Number(config.end || start + 30));
+    let start = Math.max(0, Number(config.start || 0));
+    let end = Math.max(start + 0.1, Number(config.end || start + 30));
+    if (config.smartCleanup)
+      [start, end] = await cleanSilenceBounds(input, start, end);
+    activeJob = {
+      id: String(config.renderJobId || crypto.randomUUID()),
+      progress: 1,
+      status: "preparing",
+      error: "",
+      duration: end - start,
+    };
+    renderJobs.set(activeJob.id, activeJob);
     const ratio = String(config.aspectRatio || "9:16");
     const [width, height] = sizes[ratio] || sizes["9:16"];
     const imageInputs = [];
     const overlays = [];
     let focusX = 0.5,
-      focusY = 0.5;
+      focusY = 0.5,
+      faceTrack = [];
     if (config.faceTracking && ratio !== "16:9") {
       const detected = await runOutput(
         faceTool,
         [input, String(start), String(end), "7"],
         45000,
       );
-      const [x, y] = detected.split(",").map(Number);
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        focusX = Math.min(0.85, Math.max(0.15, x));
-        focusY = Math.min(0.8, Math.max(0.2, y));
+      faceTrack = detected
+        .split(";")
+        .map((sample) => sample.split(",").map(Number))
+        .filter(
+          (sample) => sample.length === 3 && sample.every(Number.isFinite),
+        );
+      if (faceTrack.length) {
+        focusX = Math.min(0.85, Math.max(0.15, faceTrack[0][1]));
+        focusY = Math.min(0.8, Math.max(0.2, faceTrack[0][2]));
+      } else {
+        const [x, y] = detected.split(",").map(Number);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          focusX = x;
+          focusY = y;
+        }
       }
     }
 
@@ -253,9 +377,18 @@ const server = createServer(async (request, response) => {
               )
               .trim() || text;
         let words = text.match(/\S+/g) || [];
+        let timedWords = Array.isArray(segment.words)
+          ? segment.words.filter(
+              (word) =>
+                Number(word.end) > start &&
+                Number(word.start) < end &&
+                String(word.word || "").trim(),
+            )
+          : [];
         if (words.length > 16) {
           text = words.slice(0, 16).join(" ");
           words = text.match(/\S+/g) || [];
+          timedWords = timedWords.slice(0, 16);
         }
         const karaoke =
           String(config.style || "").toLowerCase() === "karaoke" &&
@@ -280,13 +413,18 @@ const server = createServer(async (request, response) => {
           const segmentTo = Math.min(end - start, Number(segment.end) - start);
           const wordDuration =
             (segmentTo - segmentFrom) / Math.max(1, words.length);
+          const timedWord = timedWords[wordIndex];
           overlays.push({
             y: captionY,
             from: karaoke
-              ? segmentFrom + wordIndex * wordDuration
+              ? timedWord
+                ? Math.max(0, Number(timedWord.start) - start)
+                : segmentFrom + wordIndex * wordDuration
               : segmentFrom,
             to: karaoke
-              ? segmentFrom + (wordIndex + 1) * wordDuration
+              ? timedWord
+                ? Math.min(end - start, Number(timedWord.end) - start)
+                : segmentFrom + (wordIndex + 1) * wordDuration
               : segmentTo,
           });
         }
@@ -327,8 +465,21 @@ const server = createServer(async (request, response) => {
       input,
     ];
     for (const path of imageInputs) args.push("-loop", "1", "-i", path);
-    const cropX = `max(0,min(iw-ow,iw*${focusX.toFixed(4)}-ow/2))`;
-    const cropY = `max(0,min(ih-oh,ih*${focusY.toFixed(4)}-oh/2))`;
+    function tracked(axis) {
+      if (faceTrack.length < 2)
+        return axis === 1 ? focusX.toFixed(4) : focusY.toFixed(4);
+      let expression = Number(faceTrack.at(-1)[axis]).toFixed(4);
+      for (let index = faceTrack.length - 2; index >= 0; index--) {
+        const current = faceTrack[index],
+          next = faceTrack[index + 1];
+        const span = Math.max(0.001, next[0] - current[0]);
+        const interpolated = `${Number(current[axis]).toFixed(4)}+(t-${current[0].toFixed(3)})/${span.toFixed(3)}*(${Number(next[axis]).toFixed(4)}-${Number(current[axis]).toFixed(4)})`;
+        expression = `if(lt(t,${next[0].toFixed(3)}),${interpolated},${expression})`;
+      }
+      return expression;
+    }
+    const cropX = `max(0,min(iw-ow,iw*(${tracked(1)})-ow/2))`;
+    const cropY = `max(0,min(ih-oh,ih*(${tracked(2)})-oh/2))`;
     const filters = [
       `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='${cropX}':y='${cropY}'[v0]`,
     ];
@@ -352,7 +503,7 @@ const server = createServer(async (request, response) => {
       if (overlay.animation === "pop")
         x = `if(lt(t,0.35),(W-w)/2+sin(t*28)*8,(W-w)/2)`;
       filters.push(
-        `[v${index}][${sourceLabel}]overlay=${x}:${y}:enable='between(t,${overlay.from},${overlay.to})'[v${index + 1}]`,
+        `[v${index}][${sourceLabel}]overlay='${x}':'${y}':enable='between(t,${overlay.from},${overlay.to})'[v${index + 1}]`,
       );
     });
     args.push(
@@ -376,10 +527,15 @@ const server = createServer(async (request, response) => {
       "aac",
       "-movflags",
       "+faststart",
+      "-progress",
+      "pipe:2",
+      "-nostats",
       "-y",
       output,
     );
-    await run("ffmpeg", args);
+    await run("ffmpeg", args, 0, activeJob);
+    activeJob.progress = 100;
+    activeJob.status = "complete";
     const video = await readFile(output);
     response.writeHead(200, {
       "content-type": "video/mp4",
@@ -388,6 +544,10 @@ const server = createServer(async (request, response) => {
     });
     response.end(video);
   } catch (error) {
+    if (activeJob && !activeJob.cancelled) {
+      activeJob.status = "failed";
+      activeJob.error = error instanceof Error ? error.message : "Render gagal";
+    }
     process.stderr.write(
       `Render gagal: ${error instanceof Error ? error.stack || error.message : String(error)}\n`,
     );

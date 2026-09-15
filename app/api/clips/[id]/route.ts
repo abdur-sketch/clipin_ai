@@ -1,9 +1,11 @@
-import { bindings, currentUser, jsonError } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guarded = guardMutation(request, "clip-edit");
+  if (guarded) return guarded;
   const user = await currentUser(),
     { id } = await params;
   const body = (await request.json()) as Record<string, unknown>;
@@ -64,12 +66,34 @@ export async function PATCH(
         .slice(0, 200)
         .map((item) => {
           const row = item as Record<string, unknown>;
+          const words = Array.isArray(row.words)
+            ? row.words
+                .slice(0, 100)
+                .map((entry) => {
+                  const word = entry as Record<string, unknown>;
+                  return {
+                    start: Number(word.start || 0),
+                    end: Number(word.end || 0),
+                    word: String(word.word || "")
+                      .trim()
+                      .slice(0, 80),
+                  };
+                })
+                .filter(
+                  (word) =>
+                    Number.isFinite(word.start) &&
+                    Number.isFinite(word.end) &&
+                    word.end > word.start &&
+                    word.word,
+                )
+            : undefined;
           return {
             start: Math.max(0, Number(row.start || 0)),
             end: Math.max(0, Number(row.end || 0)),
             text: String(row.text || "")
               .trim()
               .slice(0, 500),
+            words,
           };
         })
         .filter(
