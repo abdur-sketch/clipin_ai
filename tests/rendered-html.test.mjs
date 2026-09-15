@@ -276,6 +276,8 @@ test("advanced creator tools include transcript cuts, speaker colors, B-roll, au
   assert.match(page, /Warna subtitle per speaker/);
   assert.match(page, /kliyu-brand-kit/);
   assert.match(page, /Smart Thumbnail/);
+  assert.match(page, /FITUR CREATOR BARU/);
+  assert.match(page, /Studio Lengkap/);
   assert.match(renderer, /aselect=/);
   assert.match(renderer, /audioPreset/);
   assert.match(renderer, /brollFile/);

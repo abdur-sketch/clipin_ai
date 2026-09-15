@@ -1603,9 +1603,20 @@ function ClipPreview({
           <p>{clip.caption}</p>
           {!rendered && (
             <p className="preview-note">
-              Ini preview potongan dari video sumber. Klik Render untuk melihat
-              crop, subtitle, hook, dan watermark final.
+              Ini masih video sumber, belum hasil final. Buka Studio Lengkap
+              untuk mengatur font, efek, subtitle, audio, B-roll, dan thumbnail;
+              kemudian Render.
             </p>
+          )}
+          {!rendered && (
+            <div className="preview-feature-list" aria-label="Fitur Studio">
+              <span>Font & efek</span>
+              <span>Cut transkrip</span>
+              <span>Audio AI</span>
+              <span>B-roll</span>
+              <span>Translate</span>
+              <span>Thumbnail</span>
+            </div>
           )}
           <div className="preview-stats">
             <span>
@@ -1616,7 +1627,7 @@ function ClipPreview({
           </div>
           <div className="preview-actions">
             <button onClick={onEdit}>
-              <Pencil /> Edit clip
+              <Pencil /> Buka Studio
             </button>
             {rendered ? (
               <a className="primary" href={`/api/clips/${clip.id}/download`}>
@@ -1624,7 +1635,7 @@ function ClipPreview({
               </a>
             ) : (
               <button className="primary" onClick={onEdit}>
-                <Pencil /> Edit sebelum render
+                <WandSparkles /> Studio Lengkap
               </button>
             )}
           </div>
@@ -3240,6 +3251,55 @@ function ClipEditor({
             </div>
           </div>
           <div className="editor-controls">
+            <section className="studio-quick-tools">
+              <div>
+                <span>FITUR CREATOR BARU</span>
+                <b>Smart Studio</b>
+              </div>
+              <div className="quick-tool-grid">
+                <Toggle
+                  label="Cut transkrip"
+                  value={transcriptCut}
+                  setValue={setTranscriptCut}
+                />
+                <Toggle
+                  label="Warna speaker"
+                  value={speakerColors}
+                  setValue={setSpeakerColors}
+                />
+              </div>
+              <label>
+                Audio AI
+                <select
+                  value={audioPreset}
+                  onChange={(event) => setAudioPreset(event.target.value)}
+                >
+                  <option value="natural">Natural</option>
+                  <option value="podcast">Podcast</option>
+                  <option value="studio">Studio AI</option>
+                </select>
+              </label>
+              <div className="quick-studio-actions">
+                <label className="quick-upload">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(event) => uploadBroll(event.target.files?.[0])}
+                  />
+                  {brollName ? "✓ B-roll siap" : "+ Tambah B-roll"}
+                </label>
+                <button onClick={translateSubtitles} disabled={translationBusy}>
+                  {translationBusy ? "Memproses..." : "Translate subtitle"}
+                </button>
+                <button onClick={generateThumbnail} disabled={thumbnailBusy}>
+                  {thumbnailBusy ? "Memproses..." : "Smart thumbnail"}
+                </button>
+              </div>
+              <small>
+                Baris subtitle bertanda ✂ akan dihapus dari video saat opsi Cut
+                transkrip aktif.
+              </small>
+            </section>
             <label>
               Judul clip
               <input
