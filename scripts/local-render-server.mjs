@@ -9,13 +9,18 @@ const port = Number(process.env.KLIYU_RENDER_PORT || 8789);
 const overlayTool = process.env.KLIYU_OVERLAY_TOOL || ".local-ai/bin/render-text-overlay";
 const sizes = { "9:16": [720, 1280], "1:1": [720, 720], "16:9": [1280, 720] };
 
-function run(command, args) {
+function run(command, args, timeoutMs = 0) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
     let error = "";
+    const timer = timeoutMs ? setTimeout(() => child.kill("SIGTERM"), timeoutMs) : null;
     child.stderr.on("data", (chunk) => { error += chunk.toString(); });
     child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolve() : reject(new Error(error || `${command} exited with ${code}`)));
+    child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(error || `${command} dihentikan atau keluar dengan kode ${code}`));
+    });
   });
 }
 
@@ -51,7 +56,7 @@ const server = createServer(async (request, response) => {
       const sourceUrl = new URL(String(input.url || ""));
       if (!/^https?:$/.test(sourceUrl.protocol)) throw new Error("Link video harus menggunakan HTTP atau HTTPS");
       const outputTemplate = join(work, "import.%(ext)s");
-      await run("yt-dlp", ["--no-playlist", "--max-filesize", "2G", "--merge-output-format", "mp4", "--remux-video", "mp4", "-o", outputTemplate, sourceUrl.toString()]);
+      await run("yt-dlp", ["--no-playlist", "--max-filesize", "500M", "--concurrent-fragments", "4", "-f", "bv*[height<=480]+ba/b[height<=480]/b", "--merge-output-format", "mp4", "--remux-video", "mp4", "-o", outputTemplate, sourceUrl.toString()], 30 * 60 * 1000);
       const filename = (await readdir(work)).find((name) => name.startsWith("import."));
       if (!filename) throw new Error("Importer tidak menghasilkan video");
       const video = await readFile(join(work, filename));

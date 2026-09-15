@@ -107,8 +107,15 @@ function stabilizeLocalMoments(clips: KliyuMoment[], segments: TranscriptSegment
 
   const targetCount = Math.min(8, Math.max(1, Math.floor(duration / 12)));
   const windowLength = Math.min(35, Math.max(15, duration / Math.max(2, targetCount - 1)));
-  const maxStart = Math.max(0, duration - windowLength);
-  const starts = Array.from({ length: targetCount }, (_, index) => targetCount === 1 ? 0 : maxStart * index / (targetCount - 1));
+  const cleanSpeech = (text: string) => text.replace(/\[[^\]]+\]/g, " ").replace(/\s+/g, " ").trim();
+  const usefulSegments = segments.filter((segment) => {
+    const words = cleanSpeech(segment.text).toLowerCase().match(/[a-zà-ÿ0-9]+/gi) || [];
+    const uniqueRatio = words.length ? new Set(words).size / words.length : 0;
+    return segment.start <= duration - 12 && words.length >= 4 && cleanSpeech(segment.text).length >= 20 && uniqueRatio >= 0.45;
+  });
+  const anchors = usefulSegments.length >= Math.min(3, targetCount) ? usefulSegments : segments;
+  const plannedCount = Math.min(targetCount, anchors.length);
+  const starts = Array.from({ length: plannedCount }, (_, index) => anchors[Math.round(index * (anchors.length - 1) / Math.max(1, plannedCount - 1))].start);
 
   return starts.map((approximateStart, index) => {
     const first = segments.reduce((best, segment) => Math.abs(segment.start - approximateStart) < Math.abs(best.start - approximateStart) ? segment : best, segments[0]);
@@ -116,17 +123,18 @@ function stabilizeLocalMoments(clips: KliyuMoment[], segments: TranscriptSegment
     const wantedEnd = Math.min(duration, start + windowLength);
     const last = segments.filter((segment) => segment.end <= wantedEnd + 3 && segment.end > start + 10).at(-1);
     const end = Math.min(duration, Math.max(start + Math.min(12, duration - start), last?.end || wantedEnd));
-    const text = segments.filter((segment) => segment.end >= start && segment.start <= end).map((segment) => segment.text).join(" ").trim();
+    const text = cleanSpeech(segments.filter((segment) => segment.end >= start && segment.start <= end).map((segment) => segment.text).join(" "));
     const suggested = clips.find((clip) => clip.start >= start - 2 && clip.start <= end) || clips[index % Math.max(1, clips.length)];
-    const shortText = text.split(/(?<=[.!?])\s+/)[0]?.trim() || text.slice(0, 90);
+    const sentences = text.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+    const shortText = sentences.find((sentence) => (sentence.match(/[a-zà-ÿ0-9]+/gi) || []).length >= 4 && sentence.length >= 20) || sentences[0] || text.slice(0, 90);
     return {
       start,
       end,
       score: Math.max(65, 92 - index * 4),
       title: (shortText || suggested?.title || `Momen terbaik ${index + 1}`).slice(0, 90),
-      hook: (suggested?.hook || shortText || "Simak bagian penting ini.").slice(0, 160),
-      reason: suggested?.reason || "Potongan ini memiliki konteks utuh, pesan jelas, dan dapat berdiri sendiri.",
-      category: (suggested?.category || "insight").toLowerCase(),
+      hook: (shortText || suggested?.hook || "Simak bagian penting ini.").slice(0, 160),
+      reason: "Potongan ini memiliki konteks utuh, pesan jelas, dan dapat berdiri sendiri.",
+      category: "insight",
     };
   });
 }

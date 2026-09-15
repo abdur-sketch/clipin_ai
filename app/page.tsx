@@ -39,6 +39,7 @@ export default function Home() {
   const [projects,setProjects]=useState<ProjectSummary[]>([]);
   const [renderingIds, setRenderingIds] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [toast, setToast] = useState("");
@@ -69,7 +70,7 @@ export default function Home() {
   }), [filter, clipItems]);
 
   async function startUpload(source?: File | string, projectName?:string) {
-    setProgress(8); setProcessing(true);
+    setUploadError(""); setProgress(8); setProcessing(true);
     try {
       const file = source instanceof File ? source : undefined; const sourceUrl = typeof source === "string" ? source : undefined;
       const sourceHost = sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "";
@@ -91,7 +92,7 @@ export default function Home() {
         setClipItems(detail.clips.map((item, index) => ({ id: String(item.id), score: Number(item.score), duration: Math.max(1, Math.round(Number(item.end_time) - Number(item.start_time))), title: String(item.title), hook: String(item.hook), caption: String(item.caption), status: String(item.status) as Clip["status"], accent: accents[index % accents.length], startTime: Number(item.start_time), endTime: Number(item.end_time), style: String(item.style || "bold"), faceTracking: Boolean(item.face_tracking), hookOverlay: Boolean(item.hook_overlay), aspectRatio: String(item.aspect_ratio || "9:16"), fontSize: Number(item.font_size || 48), watermark: Boolean(item.watermark), logoName: item.logo_key ? String(item.logo_key).split("/").pop() : undefined, postCaption:item.post_caption?String(item.post_caption):undefined,postCta:item.post_cta?String(item.post_cta):undefined,postHashtags:item.post_hashtags?JSON.parse(String(item.post_hashtags)):[] })));
       }
       await loadProjects(); setProgress(100); window.setTimeout(() => { setProcessing(false); setUploadOpen(false); setView("clips"); setToast("Analisis selesai — momen terbaik ditemukan dan disimpan"); }, 500);
-    } catch (error) { setProcessing(false); setToast(error instanceof Error ? error.message : "Terjadi kesalahan"); }
+    } catch (error) { const message=error instanceof Error ? error.message : "Terjadi kesalahan"; setProcessing(false); setUploadError(message); setToast(message); }
   }
   function go(next: View) { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); }
   async function renderClip(clip: Clip) {
@@ -165,7 +166,7 @@ export default function Home() {
       </section>
 
       <nav className="mobile-nav"><button className={view === "dashboard" ? "active" : ""} onClick={() => go("dashboard")}><span><HomeIcon /></span>Home</button><button className={view === "clips" ? "active" : ""} onClick={() => go("clips")}><span><Play /></span>Clips</button><button className="mobile-create" aria-label="Buat dengan Kliyu AI" onClick={() => setUploadOpen(true)}><WandSparkles /></button><button className={view === "published" ? "active" : ""} onClick={() => go("published")}><span><Send /></span>Published</button><button className={view === "analytics" ? "active" : ""} onClick={() => go("analytics")}><span><BarChart3 /></span>Analytics</button><button className={view === "monetization" ? "active" : ""} onClick={() => go("monetization")}><span><BadgeDollarSign /></span>Money</button><button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><span><Settings /></span>Settings</button></nav>
-      {uploadOpen && <UploadModal processing={processing} progress={progress} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
+      {uploadOpen && <UploadModal processing={processing} progress={progress} error={uploadError} onClose={() => !processing && setUploadOpen(false)} onStart={startUpload} inputRef={inputRef} />}
       {preview && <ClipPreview clip={preview} onClose={() => setPreview(null)} onEdit={() => { setPreview(null); setEditor(preview); }} />}
       {editor && <ClipEditor clip={editor} onClose={() => setEditor(null)} onSave={saveClip} onNotice={setToast} />}
       {helpOpen&&<HelpModal onClose={()=>setHelpOpen(false)} onNewProject={()=>{setHelpOpen(false);setUploadOpen(true)}}/>}
@@ -251,7 +252,7 @@ function SettingsPage({notify,accountName,accountEmail}:{notify:(message:string)
   return <div className="page settings-page"><div className="simple-heading"><div><span className="eyebrow"><i/> PERSONAL WORKSPACE</span><h1>Settings</h1><p>Kelola akun, preferensi video, integrasi, dan notifikasi.</p></div><button className="primary" disabled={saving} onClick={save}>{saving?"Saving...":"Save changes"}</button></div><div className="settings-layout"><nav>{[["account","Account"],["video","Video defaults"],["notifications","Notifications"],["integrations","Integrations"]].map(([id,label])=><button key={id} className={active===id?"active":""} onClick={()=>jump(id)}>{label}</button>)}</nav><div className="settings-content"><section id="settings-account" className="settings-panel"><div><small>PROFILE</small><h2>Informasi akun</h2></div><div className="account-line"><span className="large-avatar">{accountName.split(/\s+/).map((part)=>part[0]).join("").slice(0,2).toUpperCase()}</span><div><strong>{accountName}</strong><span>{accountEmail || "Akun ChatGPT terverifikasi"}</span></div><a href="/signout-with-chatgpt?return_to=/">Sign out</a></div></section><section id="settings-video" className="settings-panel"><div><small>VIDEO DEFAULTS</small><h2>Preferensi pemrosesan</h2></div><div className="settings-fields"><label>Bahasa transkripsi<select value={language} onChange={e=>setLanguage(e.target.value)}><option value="id">Bahasa Indonesia</option><option value="en">English</option><option value="auto">Auto detect</option></select></label><label>Zona waktu<select value={timezone} onChange={e=>setTimezone(e.target.value)}><option>Asia/Jakarta</option><option>Asia/Makassar</option><option>Asia/Jayapura</option></select></label><label>Gaya subtitle<select value={style} onChange={e=>setStyle(e.target.value)}><option value="clean">Clean</option><option value="bold">Bold</option><option value="karaoke">Karaoke</option></select></label></div></section><section id="settings-notifications" className="settings-panel"><div><small>NOTIFICATIONS</small><h2>Pemberitahuan</h2></div><Toggle label="Email ringkasan mingguan" value={email} setValue={setEmail}/><Toggle label="Video selesai diproses" value={processing} setValue={setProcessing}/><Toggle label="Export selesai atau gagal" value={publishing} setValue={setPublishing}/></section><section id="settings-integrations" className="settings-panel"><div><small>PRODUCTION ENGINE</small><h2>Status mesin produksi</h2></div><div className="integration-list">{[["database","Database D1"],["storage","Media Storage R2"],["transcription","Whisper Transcription"],["momentDetection","KLIYU Moment Detection"],["mp4Export","FFmpeg MP4 Export"]].map(([key,label])=><div key={key}><span><b>{label}</b><small>{capabilities[key]?"Siap digunakan":"Perlu dikonfigurasi"}</small></span><em className={capabilities[key]?"connected":"missing"}>{capabilities[key]?"CONNECTED":"NOT CONNECTED"}</em></div>)}</div></section></div></div></div>
 }
 
-function UploadModal({ processing, progress, onClose, onStart, inputRef }: { processing: boolean; progress: number; onClose: () => void; onStart: (source?: File | string,projectName?:string) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+function UploadModal({ processing, progress, error, onClose, onStart, inputRef }: { processing: boolean; progress: number; error:string; onClose: () => void; onStart: (source?: File | string,projectName?:string) => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const [sourceMode, setSourceMode] = useState<"file" | "link">("file");
   const [videoLink, setVideoLink] = useState("");
   const [linkError, setLinkError] = useState("");
@@ -278,6 +279,7 @@ function UploadModal({ processing, progress, onClose, onStart, inputRef }: { pro
         <span className="modal-kicker">NEW PROJECT</span>
         <h2>Video panjang masuk.<br /><em>Klip terbaik keluar.</em></h2>
         <p>Pilih video asli dari perangkat atau tempel link video yang dapat diakses publik.</p>
+        {error&&<div className="upload-error-banner">{error}</div>}
         <label className="project-name-field">Project Name<input value={projectName} onChange={event=>setProjectName(event.target.value)} placeholder="Contoh: Kajian — Pentingnya Shalat"/></label>
         <div className="source-tabs" role="tablist" aria-label="Pilih sumber video">
           <button role="tab" aria-selected={sourceMode === "file"} className={sourceMode === "file" ? "active" : ""} onClick={() => { setSourceMode("file"); setLinkError(""); }}><FileVideo2 /> Video asli</button>
@@ -289,9 +291,9 @@ function UploadModal({ processing, progress, onClose, onStart, inputRef }: { pro
           </button>
           <input ref={inputRef} type="file" accept="video/mp4,video/quicktime" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onStart(file,projectName); }} />
         </> : <div className="link-source-panel">
-          <label htmlFor="new-project-video-link">Link file video langsung</label>
-          <div className={`video-link-input ${linkError ? "invalid" : ""}`}><Link2 /><input id="new-project-video-link" value={videoLink} onChange={(event) => { setVideoLink(event.target.value); setLinkError(""); }} onKeyDown={(event) => { if (event.key === "Enter") submitLink(); }} placeholder="https://cdn.example.com/video.mp4" inputMode="url" autoFocus /><button onClick={submitLink} disabled={!videoLink.trim()}>Proses <ArrowRight /></button></div>
-          {linkError ? <small className="link-error">{linkError}</small> : <small>Mendukung MP4/WebM publik. Link halaman YouTube, TikTok, dan Instagram masuk roadmap berikutnya.</small>}
+          <label htmlFor="new-project-video-link">Link video YouTube, TikTok, Instagram, atau file langsung</label>
+          <div className={`video-link-input ${linkError ? "invalid" : ""}`}><Link2 /><input id="new-project-video-link" value={videoLink} onChange={(event) => { setVideoLink(event.target.value); setLinkError(""); }} onKeyDown={(event) => { if (event.key === "Enter") submitLink(); }} placeholder="https://www.youtube.com/watch?v=..." inputMode="url" autoFocus /><button onClick={submitLink} disabled={!videoLink.trim()}>Proses <ArrowRight /></button></div>
+          {linkError ? <small className="link-error">{linkError}</small> : <small>Mendukung video publik. Gunakan hanya video milik Anda atau yang Anda punya izin untuk diproses.</small>}
         </div>}
       </> : <>
         <span className="modal-kicker live">● ANALYZING VIDEO</span><h2>Menemukan momen<br /><em>terbaik Anda.</em></h2>

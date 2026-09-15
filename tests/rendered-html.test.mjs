@@ -25,13 +25,16 @@ test("new project accepts original files and honest direct video links", async (
   assert.match(page, /onStart: \(source\?: File \| string,projectName\?:string\)/);
   assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
-  assert.match(page, /Link file video langsung/);
+  assert.match(page, /Link video YouTube, TikTok, Instagram/);
   assert.match(page, /MP4\/WebM publik/);
   assert.doesNotMatch(page, /Gunakan video contoh/);
   assert.match(projectsApi, /Link video tidak valid/);
   assert.match(processApi, /contentType\.startsWith\("video\/"\)/);
   assert.match(processApi, /\/import/);
   assert.match(processApi, /LOCAL_RENDER_BASE_URL/);
+  assert.match(processApi, /512 \* 1024 \* 1024/);
+  assert.match(await source("scripts/local-render-server.mjs"), /height<=480/);
+  assert.match(await source("scripts/local-render-server.mjs"), /500M/);
 });
 
 test("real OpenAI and local AI pipelines replace fake output", async () => {

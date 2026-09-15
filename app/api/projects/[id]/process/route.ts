@@ -39,7 +39,7 @@ async function ensureStoredSource(projectId: string, project: ProjectSource) {
   if (!contentType.startsWith("video/")) throw new Error("Link tersebut tidak menghasilkan file video. Pastikan link publik dan Anda memiliki izin menggunakannya.");
   const key = `imports/${projectId}/source`;
   await bindings.MEDIA.put(key, source.body, { httpMetadata: { contentType } });
-  await bindings.DB.prepare("UPDATE projects SET storage_key=?,content_type=?,status='uploaded',progress=15,updated_at=? WHERE id=?").bind(key,contentType,Date.now(),projectId).run();
+  await bindings.DB.prepare("UPDATE projects SET storage_key=?,content_type=?,status='processing',progress=15,updated_at=? WHERE id=?").bind(key,contentType,Date.now(),projectId).run();
   return key;
 }
 
@@ -58,7 +58,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     if (!storageKey) throw new Error("Video sumber belum tersedia");
     const object = await bindings.MEDIA.get(storageKey);
     if (!object) throw new Error("Video sumber tidak ditemukan di penyimpanan");
-    if (object.size > 25 * 1024 * 1024) throw new Error("Transkripsi langsung saat ini mendukung file hingga 25 MB. Kompres video atau hubungkan pipeline media untuk file besar.");
+    const maxSourceSize = provider === "ollama" ? 512 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (object.size > maxSourceSize) throw new Error(provider === "ollama" ? "Video melebihi batas pemrosesan lokal 512 MB. Kompres video terlebih dahulu." : "OpenAI Whisper mendukung file hingga 25 MB. Kompres video atau gunakan AI lokal.");
     await bindings.DB.prepare("UPDATE projects SET progress=40,updated_at=? WHERE id=?").bind(Date.now(),projectId).run();
     const file = new File([await object.arrayBuffer()],project.title.replace(/[^a-z0-9]+/gi,"-") + ".mp4",{type:object.httpMetadata?.contentType || project.content_type || "video/mp4"});
     const transcriptData = await transcribe(file, project.language);
