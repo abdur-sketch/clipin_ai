@@ -49,6 +49,8 @@ npm run local-ai:check
 npm run dev
 ```
 
+Perintah `npm run dev` juga memastikan seluruh layanan lokal aktif dan memakai port 3000 secara tetap. Jika browser pernah menampilkan overlay Vite setelah server berhenti, tutup overlay lalu muat ulang `http://localhost:3000` setelah perintah ini menampilkan status `Local`.
+
 Mode ini hanya tersedia saat aplikasi berjalan lokal di Mac karena deployment cloud tidak dapat mengakses `127.0.0.1`. Untuk mematikan proses latar belakang yang dijalankan KLIYU gunakan `npm run local-ai:stop`.
 
 ## Konfigurasi produksi

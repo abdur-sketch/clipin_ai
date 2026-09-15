@@ -13,6 +13,13 @@ test("build contains the KLIYU MVP product", async () => {
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape|Building your site/);
 });
 
+test("local development prevents recursive Vite websocket error overlays", async () => {
+  const [viteConfig, packageJson] = await Promise.all([source("vite.config.ts"), source("package.json")]);
+  assert.match(viteConfig, /forwardConsole:\s*false/);
+  assert.match(viteConfig, /strictPort:\s*true/);
+  assert.match(packageJson, /start-local-ai\.sh/);
+});
+
 test("new project accepts original files and honest direct video links", async () => {
   const [page, projectsApi, processApi] = await Promise.all([source("app/page.tsx"), source("app/api/projects/route.ts"), source("app/api/projects/[id]/process/route.ts")]);
   assert.match(page, /onStart: \(source\?: File \| string,projectName\?:string\)/);
