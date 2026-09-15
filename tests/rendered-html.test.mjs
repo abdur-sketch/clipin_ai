@@ -50,8 +50,8 @@ test("real OpenAI and local AI pipelines replace fake output", async () => {
   assert.doesNotMatch(processApi + ai, /demoMoments|clipin-demo/);
 });
 
-test("clip workflow includes filters, persistent Studio controls, render, and MP4 download", async () => {
-  const [page, clipApi, renderApi, localRender, downloadApi, logoApi] = await Promise.all([source("app/page.tsx"), source("app/api/clips/[id]/route.ts"), source("app/api/clips/[id]/render/route.ts"), source("scripts/local-render-server.mjs"), source("app/api/clips/[id]/download/route.ts"), source("app/api/clips/[id]/logo/route.ts")]);
+test("clip workflow includes filters, real preview, persistent Studio controls, render, and MP4 download", async () => {
+  const [page, clipApi, renderApi, localRender, downloadApi, mediaApi, logoApi] = await Promise.all([source("app/page.tsx"), source("app/api/clips/[id]/route.ts"), source("app/api/clips/[id]/render/route.ts"), source("scripts/local-render-server.mjs"), source("app/api/clips/[id]/download/route.ts"), source("app/api/clips/[id]/media/route.ts"), source("app/api/clips/[id]/logo/route.ts")]);
   for (const feature of ["filter === \"hot\"", "filter === \"ready\"", "filter === \"rendered\"", "ClipPreview", "ClipEditor", "Automatic captions", "Face tracking", "Hook overlay", "KLIYU watermark", "Karaoke", "Export MP4"]) assert.ok(page.includes(feature), `missing ${feature}`);
   for (const ratio of ["9:16", "1:1", "16:9"]) assert.ok(page.includes(ratio));
   assert.match(clipApi, /status='ready',rendered_key=NULL/);
@@ -61,6 +61,10 @@ test("clip workflow includes filters, persistent Studio controls, render, and MP
   for (const feature of ["captionsEnabled", "hookOverlay", "watermark", "logo", "loudnorm", "render-text-overlay"]) assert.ok((renderApi + localRender).includes(feature), `local render missing ${feature}`);
   assert.match(renderApi, /rendered_key/);
   assert.match(downloadApi, /content-disposition/i);
+  assert.match(page, /real-clip-video/);
+  assert.match(page, /\/media/);
+  assert.match(mediaApi, /content-range/);
+  assert.match(mediaApi, /status:206/);
   assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
 });
 

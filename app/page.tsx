@@ -213,8 +213,18 @@ function ClipCard({ clip, onEdit, onPreview, onRender, onExport, rendering }: { 
 }
 
 function ClipPreview({ clip, onClose, onEdit }: { clip: Clip; onClose: () => void; onEdit: () => void }) {
-  const [playing, setPlaying] = useState(true);
-  return <div className="modal-backdrop preview-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="clip-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${clip.title}`}><button className="close-button" aria-label="Tutup preview" onClick={onClose}><X /></button><div className={`preview-stage ${clip.accent}`}><div className="phone-preview"><div className="editor-person"><i /><b /></div><span className="hook-overlay">{clip.hook}</span><div className="editor-subtitle bold">JANGAN MULAI <em>BISNIS</em><br />SEBELUM TAHU INI</div><button aria-label={playing ? "Pause preview" : "Play preview"} onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button></div></div><div className="preview-details"><span className="modal-kicker">CLIP PREVIEW</span><h2>{clip.title}</h2><p>{clip.caption}</p><div className="preview-stats"><span><Flame /> <b>{clip.score}</b> Viral score</span><span>{clip.duration} detik</span><span>{clip.aspectRatio || "9:16"}</span></div><div className="preview-actions"><button onClick={onEdit}><Pencil /> Edit clip</button><button className="primary" onClick={() => { const blob = new Blob([clip.caption], { type: "text/plain" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `clip-${String(clip.id)}-caption.txt`; anchor.click(); URL.revokeObjectURL(url); }}><Download /> Download caption</button></div></div></section></div>;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const rendered = clip.status === "rendered";
+  function positionPreview() {
+    if (!rendered && videoRef.current) videoRef.current.currentTime = clip.startTime || 0;
+  }
+  function stopAtClipEnd() {
+    const video = videoRef.current;
+    if (!rendered && video && clip.endTime !== undefined && video.currentTime >= clip.endTime) {
+      video.pause(); video.currentTime = clip.startTime || 0;
+    }
+  }
+  return <div className="modal-backdrop preview-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="clip-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${clip.title}`}><button className="close-button" aria-label="Tutup preview" onClick={onClose}><X /></button><div className={`preview-stage ${clip.accent}`}><video ref={videoRef} className={`real-clip-video ratio-${(clip.aspectRatio || "9:16").replace(":","-")}`} src={`/api/clips/${clip.id}/media`} controls playsInline preload="metadata" onLoadedMetadata={positionPreview} onTimeUpdate={stopAtClipEnd}>Browser Anda tidak mendukung pemutar video.</video></div><div className="preview-details"><span className="modal-kicker">{rendered ? "FINAL CLIP PREVIEW" : "SOURCE CLIP PREVIEW"}</span><h2>{clip.title}</h2><p>{clip.caption}</p>{!rendered&&<p className="preview-note">Ini preview potongan dari video sumber. Klik Render untuk melihat crop, subtitle, hook, dan watermark final.</p>}<div className="preview-stats"><span><Flame /> <b>{clip.score}</b> Viral score</span><span>{clip.duration} detik</span><span>{clip.aspectRatio || "9:16"}</span></div><div className="preview-actions"><button onClick={onEdit}><Pencil /> Edit clip</button>{rendered?<a className="primary" href={`/api/clips/${clip.id}/download`}><Download /> Export MP4</a>:<button className="primary" onClick={onEdit}><Pencil /> Edit sebelum render</button>}</div></div></section></div>;
 }
 
 function ProjectsPage({ projects, onOpen, onUpload }: { projects:ProjectSummary[];onOpen: (id:string) => void; onUpload: () => void }) {
