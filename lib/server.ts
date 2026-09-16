@@ -12,6 +12,7 @@ type AppEnv = {
   OLLAMA_MODEL?: string;
   WHISPER_BASE_URL?: string;
   LOCAL_RENDER_BASE_URL?: string;
+  LOCAL_AI_TOKEN?: string;
   RENDER_SERVICE_URL?: string;
   RENDER_SERVICE_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
@@ -64,6 +65,15 @@ export function aiProvider() {
   if (bindings.OLLAMA_BASE_URL || bindings.WHISPER_BASE_URL)
     return "ollama" as const;
   return "openai" as const;
+}
+
+export function localAiHeaders(extra: Record<string, string> = {}) {
+  return {
+    ...extra,
+    ...(bindings.LOCAL_AI_TOKEN
+      ? { authorization: `Bearer ${bindings.LOCAL_AI_TOKEN}` }
+      : {}),
+  };
 }
 
 export async function currentUser() {

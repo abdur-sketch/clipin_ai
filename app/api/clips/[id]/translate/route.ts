@@ -43,6 +43,7 @@ export async function POST(
       model:
         provider === "ollama" ? bindings.OLLAMA_MODEL : bindings.OPENAI_MODEL,
       baseUrl: bindings.OLLAMA_BASE_URL,
+      authToken: bindings.LOCAL_AI_TOKEN,
       safetyIdentifier: user.id,
       language,
       rows: subtitles.map((row, index) => ({

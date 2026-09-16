@@ -1,4 +1,4 @@
-import { bindings, currentUser, guardMutation, jsonError, syncD1Record } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError, localAiHeaders, syncD1Record } from "@/lib/server";
 
 export async function GET(
   _: Request,
@@ -19,6 +19,7 @@ export async function GET(
   ) {
     const response = await fetch(
       `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/progress/${clip.render_job_id}`,
+      { headers: localAiHeaders() },
     );
     if (response.ok) {
       const live = (await response.json()) as {
@@ -67,7 +68,7 @@ export async function DELETE(
   if (owned.render_job_id && bindings.LOCAL_RENDER_BASE_URL)
     await fetch(
       `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/progress/${owned.render_job_id}`,
-      { method: "DELETE" },
+      { method: "DELETE", headers: localAiHeaders() },
     );
   await bindings.DB.prepare(
     "UPDATE clips SET status='ready',render_job_id=NULL,render_progress=0,updated_at=? WHERE id=?",
@@ -178,6 +179,7 @@ export async function POST(
       `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/render`,
       {
         method: "POST",
+        headers: localAiHeaders(),
         body: form,
       },
     );

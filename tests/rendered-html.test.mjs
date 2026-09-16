@@ -110,6 +110,23 @@ test("real OpenAI and local AI pipelines replace fake output", async () => {
   assert.doesNotMatch(processApi + ai, /demoMoments|clipin-demo/);
 });
 
+test("hosted Ollama uses an authenticated local AI gateway", async () => {
+  const [gateway, server, processApi, ai, renderer] = await Promise.all([
+    source("scripts/local-ai-gateway.mjs"),
+    source("lib/server.ts"),
+    source("app/api/projects/[id]/process/route.ts"),
+    source("lib/kliyu-ai.ts"),
+    source("app/api/clips/[id]/render/route.ts"),
+  ]);
+  assert.match(gateway, /Bearer \$\{token\}/);
+  assert.match(gateway, /active >= 2/);
+  assert.match(gateway, /600 \* 1024 \* 1024/);
+  assert.match(server, /LOCAL_AI_TOKEN/);
+  assert.match(processApi, /localAiHeaders/);
+  assert.match(ai, /authToken/);
+  assert.match(renderer, /localAiHeaders/);
+});
+
 test("clip workflow includes filters, real preview, typography controls, Studio, render, and MP4 download", async () => {
   const [
     page,

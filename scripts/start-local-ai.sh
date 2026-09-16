@@ -70,4 +70,19 @@ for _ in {1..30}; do
   sleep 1
 done
 curl --silent --fail http://127.0.0.1:8789/health >/dev/null || { echo "Render lokal gagal dijalankan. Periksa .local-ai/logs/render.log"; exit 1; }
+
+GATEWAY_TOKEN_FILE="$STATE_DIR/gateway-token"
+if [ ! -s "$GATEWAY_TOKEN_FILE" ]; then
+  openssl rand -hex 32 > "$GATEWAY_TOKEN_FILE"
+  chmod 600 "$GATEWAY_TOKEN_FILE"
+fi
+if ! curl --silent --fail http://127.0.0.1:8791/health >/dev/null 2>&1; then
+  launchctl remove com.kliyu.gateway >/dev/null 2>&1 || true
+  launchctl submit -l com.kliyu.gateway -o "$STATE_DIR/logs/gateway.log" -e "$STATE_DIR/logs/gateway.log" -- /usr/bin/env PATH="/usr/local/bin:/usr/bin:/bin" KLIYU_GATEWAY_TOKEN="$(tr -d '\n' < "$GATEWAY_TOKEN_FILE")" node "$PROJECT_DIR/scripts/local-ai-gateway.mjs"
+fi
+for _ in {1..20}; do
+  curl --silent --fail http://127.0.0.1:8791/health >/dev/null 2>&1 && break
+  sleep 0.25
+done
+curl --silent --fail http://127.0.0.1:8791/health >/dev/null || { echo "Gateway AI lokal gagal dijalankan. Periksa .local-ai/logs/gateway.log"; exit 1; }
 echo "Ollama, Whisper, dan render FFmpeg lokal aktif."

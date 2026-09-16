@@ -72,6 +72,7 @@ type AiOptions = {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  authToken?: string;
   safetyIdentifier?: string;
 };
 
@@ -97,7 +98,12 @@ async function structuredJson<T>(
     );
     const response = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(options.authToken
+          ? { authorization: `Bearer ${options.authToken}` }
+          : {}),
+      },
       body: JSON.stringify({
         model: options.model || "qwen2.5:1.5b",
         system: options.instructions,

@@ -6,6 +6,7 @@ import {
   guardMutation,
   id,
   jsonError,
+  localAiHeaders,
 } from "@/lib/server";
 import {
   firebaseDelete,
@@ -67,6 +68,7 @@ async function transcribe(
     ).replace(/\/$/, "");
     const response = await fetch(`${baseUrl}/inference`, {
       method: "POST",
+      headers: localAiHeaders(),
       body: form,
     });
     if (!response.ok)
@@ -108,7 +110,7 @@ async function ensureStoredSource(projectId: string, project: ProjectSource) {
       `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/import`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: localAiHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({ url: project.source_url }),
       },
     );
@@ -275,6 +277,7 @@ export async function POST(
       model:
         provider === "ollama" ? bindings.OLLAMA_MODEL : bindings.OPENAI_MODEL,
       baseUrl: bindings.OLLAMA_BASE_URL,
+      authToken: bindings.LOCAL_AI_TOKEN,
       transcript,
       segments,
       performanceHint,

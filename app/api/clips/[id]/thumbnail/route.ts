@@ -1,4 +1,4 @@
-import { bindings, currentUser, guardMutation, jsonError, syncD1Record } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError, localAiHeaders, syncD1Record } from "@/lib/server";
 
 async function ownedClip(id: string, userId: string) {
   return bindings.DB.prepare(
@@ -65,7 +65,7 @@ export async function POST(
   );
   const generated = await fetch(
     `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/thumbnail`,
-    { method: "POST", body: form },
+    { method: "POST", headers: localAiHeaders(), body: form },
   );
   if (!generated.ok)
     return jsonError(

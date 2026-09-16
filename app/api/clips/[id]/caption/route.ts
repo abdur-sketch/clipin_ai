@@ -8,7 +8,7 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
   const clip=await bindings.DB.prepare("SELECT c.*,t.text transcript FROM clips c JOIN projects p ON p.id=c.project_id LEFT JOIN transcripts t ON t.project_id=p.id WHERE c.id=? AND p.user_id=?").bind(id,user.id).first<Record<string,unknown>>();
   if(!clip)return jsonError("Clip tidak ditemukan",404);
   try{
-    const result=await generateSocialCaption({provider,apiKey:bindings.OPENAI_API_KEY,model:provider==="ollama"?bindings.OLLAMA_MODEL:bindings.OPENAI_MODEL,baseUrl:bindings.OLLAMA_BASE_URL,safetyIdentifier:user.id,title:String(clip.title),hook:String(clip.hook),category:String(clip.category||""),transcript:String(clip.transcript||"")});
+    const result=await generateSocialCaption({provider,apiKey:bindings.OPENAI_API_KEY,model:provider==="ollama"?bindings.OLLAMA_MODEL:bindings.OPENAI_MODEL,baseUrl:bindings.OLLAMA_BASE_URL,authToken:bindings.LOCAL_AI_TOKEN,safetyIdentifier:user.id,title:String(clip.title),hook:String(clip.hook),category:String(clip.category||""),transcript:String(clip.transcript||"")});
     await bindings.DB.prepare("UPDATE clips SET post_caption=?,post_cta=?,post_hashtags=?,updated_at=? WHERE id=?").bind(`${result.hook}\n\n${result.caption}`,result.cta,JSON.stringify(result.hashtags),Date.now(),id).run();
     await syncD1Record("clips",id);
     return Response.json(result);
