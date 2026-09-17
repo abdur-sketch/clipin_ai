@@ -106,7 +106,7 @@ test("Browser AI transcribes privately and YouTube captions avoid server AI", as
   assert.match(page, /project\.status !== "complete" \|\| !project\.clip_count/);
 });
 
-test("clip workflow includes filters, real preview, typography controls, Studio, render, and MP4 download", async () => {
+test("clip workflow includes filters, real preview, typography controls, Studio, browser render, and download", async () => {
   const [
     page,
     clipApi,
@@ -114,6 +114,7 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
     downloadApi,
     mediaApi,
     logoApi,
+    browserMedia,
   ] = await Promise.all([
     source("app/page.tsx"),
     source("app/api/clips/[id]/route.ts"),
@@ -121,6 +122,7 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
     source("app/api/clips/[id]/download/route.ts"),
     source("app/api/clips/[id]/media/route.ts"),
     source("app/api/clips/[id]/logo/route.ts"),
+    source("lib/browser-media.ts"),
   ]);
   for (const feature of [
     'filter === "hot"',
@@ -133,12 +135,15 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
     "Hook overlay",
     "KLIYU watermark",
     "Karaoke",
-    "Export MP4",
+    "Export video",
   ])
     assert.ok(page.includes(feature), `missing ${feature}`);
   for (const ratio of ["9:16", "1:1", "16:9"]) assert.ok(page.includes(ratio));
   assert.match(clipApi, /status='ready',rendered_key=NULL/);
   assert.match(renderApi, /RENDER_SERVICE_URL/);
+  assert.match(renderApi, /export async function PUT/);
+  assert.match(browserMedia, /MediaRecorder/);
+  assert.match(browserMedia, /captureStream/);
   assert.doesNotMatch(renderApi, /LOCAL_RENDER_BASE_URL|127\.0\.0\.1/);
   assert.match(renderApi, /rendered_key/);
   assert.match(downloadApi, /content-disposition/i);
@@ -263,7 +268,8 @@ test("advanced creator tools include transcript cuts, speaker colors, B-roll, au
   assert.match(page, /Studio Lengkap/);
   assert.match(renderApi, /JSON\.stringify\(clip\)/);
   assert.match(migration, /transcript_cut/);
-  assert.match(translation, /translateSubtitleText/);
+  assert.match(translation, /translations/);
+  assert.match(page, /translateRowsInBrowser/);
 });
 
 test("personal workspace metadata, social card, and responsive styling are present", async () => {
@@ -313,18 +319,18 @@ test("account settings and authenticated sign-out remain wired", async () => {
   assert.match(account, /user_settings/);
   assert.match(account, /subscriptions/);
   assert.match(capabilities, /aiProvider: "browser"/);
-  assert.match(capabilities, /RENDER_SERVICE_URL/);
+  assert.match(capabilities, /browserRender: true/);
   assert.match(notifications, /UPDATE notifications SET read=1/);
 });
 
 test("published content, analytics, monetization, and AI caption are fully wired", async () => {
-  const [page, contentUi, contentApi, captionApi, ai, migration] =
+  const [page, contentUi, contentApi, captionApi, browserAi, migration] =
     await Promise.all([
       source("app/page.tsx"),
       source("app/content-os.tsx"),
       source("app/api/content/route.ts"),
       source("app/api/clips/[id]/caption/route.ts"),
-      source("lib/kliyu-ai.ts"),
+      source("lib/browser-ai.ts"),
       source("drizzle/0006_nosy_jean_grey.sql"),
     ]);
   for (const feature of ["Published", "Analytics", "Monetization"])
@@ -341,7 +347,7 @@ test("published content, analytics, monetization, and AI caption are fully wired
   assert.match(contentApi, /UPDATE publications SET views/);
   assert.match(contentApi, /INSERT INTO revenue_entries/);
   assert.match(contentApi, /scheduled_at,published_at/);
-  assert.match(ai, /kliyu_social_caption/);
+  assert.match(browserAi, /generateSocialCaptionInBrowser/);
   assert.match(captionApi, /post_hashtags/);
   assert.match(page, /Generate Caption/);
   assert.match(page, /Copy Caption/);

@@ -9,6 +9,37 @@ export type BrowserAnalysis = {
 
 type WhisperChunk = { text?: string; timestamp?: [number, number | null] };
 type WhisperResult = { text?: string; chunks?: WhisperChunk[] };
+type BrowserLanguageSession = {
+  prompt: (input: string) => Promise<string>;
+  destroy?: () => void;
+};
+
+function languageModelApi() {
+  return (
+    globalThis as typeof globalThis & {
+      LanguageModel?: {
+        create: (options?: Record<string, unknown>) => Promise<BrowserLanguageSession>;
+      };
+    }
+  ).LanguageModel;
+}
+
+function cleanModelJson(value: string) {
+  return value.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+}
+
+async function browserPrompt(system: string, input: string) {
+  const api = languageModelApi();
+  if (!api) return null;
+  const session = await api.create({
+    initialPrompts: [{ role: "system", content: system }],
+  });
+  try {
+    return await session.prompt(input);
+  } finally {
+    session.destroy?.();
+  }
+}
 
 let transcriberPromise: Promise<
   (audio: Float32Array, options: Record<string, unknown>) => Promise<WhisperResult>
@@ -69,6 +100,13 @@ async function browserTranscriber(
     })();
   }
   return transcriberPromise;
+}
+
+export async function prepareBrowserAi(
+  onProgress?: (progress: number, message: string) => void,
+) {
+  await browserTranscriber(onProgress);
+  return browserAiReadiness();
 }
 
 function fallbackSegments(text: string, duration: number) {
@@ -201,16 +239,7 @@ export async function detectMomentsInBrowser(
   const candidates = scoreWindows(segments);
   if (!candidates.length)
     throw new Error("Video belum memiliki cukup percakapan untuk dibuat klip");
-  const languageModel = (
-    globalThis as typeof globalThis & {
-      LanguageModel?: {
-        create: (options?: Record<string, unknown>) => Promise<{
-          prompt: (input: string) => Promise<string>;
-          destroy?: () => void;
-        }>;
-      };
-    }
-  ).LanguageModel;
+  const languageModel = languageModelApi();
   let enhancements: Array<{ title?: string; hook?: string; category?: string }> = [];
   if (languageModel) {
     try {
@@ -227,7 +256,7 @@ export async function detectMomentsInBrowser(
         `Buat title, hook, dan category untuk setiap kandidat ini. Jangan mengarang ucapan. Format {"clips":[{"title":"...","hook":"...","category":"..."}]}. Kandidat: ${JSON.stringify(candidates.map((item) => item.text.slice(0, 700)))}`,
       );
       enhancements = (
-        JSON.parse(output.replace(/^```(?:json)?\s*|\s*```$/g, "")) as {
+        JSON.parse(cleanModelJson(output)) as {
           clips?: typeof enhancements;
         }
       ).clips || [];
@@ -252,6 +281,95 @@ export async function detectMomentsInBrowser(
       category: String(enhanced?.category || "insight").slice(0, 40),
     } satisfies KliyuMoment;
   });
+}
+
+export async function generateSocialCaptionInBrowser(options: {
+  title: string;
+  hook: string;
+  transcript: string;
+}) {
+  try {
+    const output = await browserPrompt(
+      "Anda copywriter konten Indonesia. Balas hanya JSON valid tanpa markdown.",
+      `Buat caption sosial dari klip ini. Format {"hook":"...","caption":"...","cta":"...","hashtags":["#..."]}. Jangan mengarang fakta. Judul: ${options.title}\nHook: ${options.hook}\nTranskrip: ${options.transcript.slice(0, 5000)}`,
+    );
+    if (output) {
+      const parsed = JSON.parse(cleanModelJson(output)) as {
+        hook?: string;
+        caption?: string;
+        cta?: string;
+        hashtags?: string[];
+      };
+      if (parsed.caption && parsed.cta && parsed.hashtags?.length)
+        return {
+          hook: String(parsed.hook || options.hook).slice(0, 180),
+          caption: String(parsed.caption).slice(0, 1500),
+          cta: String(parsed.cta).slice(0, 180),
+          hashtags: parsed.hashtags.slice(0, 12).map((item) =>
+            String(item).startsWith("#") ? String(item) : `#${String(item)}`,
+          ),
+        };
+    }
+  } catch {
+    /* deterministic browser fallback below */
+  }
+  const keywords = `${options.title} ${options.hook}`
+    .toLowerCase()
+    .match(/[a-z0-9]{4,}/g)
+    ?.filter((word, index, all) => all.indexOf(word) === index)
+    .slice(0, 5) || ["video", "kreator"];
+  const excerpt = options.transcript.trim().split(/(?<=[.!?])\s+/)[0] || options.hook;
+  return {
+    hook: options.hook.slice(0, 180),
+    caption: `${options.hook}\n\n${excerpt}`.slice(0, 1500),
+    cta: "Simpan video ini dan bagikan kepada teman yang membutuhkannya.",
+    hashtags: ["#KLIYU", "#ShortVideo", ...keywords.map((word) => `#${word.replace(/[^a-z0-9_]/g, "")}`)].slice(0, 8),
+  };
+}
+
+export async function translateRowsInBrowser(
+  rows: Array<{ text: string }>,
+  sourceLanguage: string,
+  targetLanguage: string,
+) {
+  const translatorApi = (
+    globalThis as typeof globalThis & {
+      Translator?: {
+        create: (options: { sourceLanguage: string; targetLanguage: string }) => Promise<{
+          translate: (text: string) => Promise<string>;
+          destroy?: () => void;
+        }>;
+      };
+    }
+  ).Translator;
+  if (translatorApi) {
+    const translator = await translatorApi.create({ sourceLanguage, targetLanguage });
+    try {
+      const translated: string[] = [];
+      for (const row of rows) translated.push(await translator.translate(row.text));
+      return translated;
+    } finally {
+      translator.destroy?.();
+    }
+  }
+  const output = await browserPrompt(
+    "Anda penerjemah subtitle. Balas hanya JSON valid tanpa markdown dan pertahankan jumlah baris.",
+    `Terjemahkan ke bahasa ${targetLanguage}. Format {"rows":["..."]}. Baris: ${JSON.stringify(rows.map((row) => row.text))}`,
+  );
+  if (!output)
+    throw new Error("Terjemahan Browser AI membutuhkan Chrome/Edge terbaru dengan Built-in AI aktif.");
+  const parsed = JSON.parse(cleanModelJson(output)) as { rows?: string[] };
+  if (!parsed.rows || parsed.rows.length !== rows.length)
+    throw new Error("Hasil terjemahan Browser AI tidak lengkap");
+  return parsed.rows.map(String);
+}
+
+export function browserAiReadiness() {
+  const gpu = typeof navigator !== "undefined" && "gpu" in navigator;
+  const mediaRecorder = typeof window !== "undefined" && "MediaRecorder" in window;
+  const translator = typeof globalThis !== "undefined" && "Translator" in globalThis;
+  const languageModel = typeof globalThis !== "undefined" && "LanguageModel" in globalThis;
+  return { gpu, mediaRecorder, translator, languageModel };
 }
 
 export async function analyzeVideoInBrowser(

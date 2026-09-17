@@ -1,5 +1,14 @@
 import { bindings, currentUser, jsonError, syncD1Record } from "@/lib/server";
 
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const user = await currentUser(), { id } = await params;
+  const clip = await bindings.DB.prepare("SELECT clips.logo_key FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?").bind(id,user.id).first<{logo_key?:string}>();
+  if (!clip?.logo_key) return jsonError("Logo belum tersedia",404);
+  const image=await bindings.MEDIA.get(clip.logo_key);
+  if(!image)return jsonError("File logo tidak ditemukan",404);
+  return new Response(image.body,{headers:{"content-type":image.httpMetadata?.contentType||"image/png","cache-control":"private, max-age=3600"}});
+}
+
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser(), { id } = await params;
   const owned = await bindings.DB.prepare("SELECT clips.id FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?").bind(id,user.id).first();

@@ -5,8 +5,6 @@ import { firebaseGet, firebaseSet } from "@/lib/firebase";
 type AppEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
-  OPENAI_API_KEY?: string;
-  OPENAI_MODEL?: string;
   RENDER_SERVICE_URL?: string;
   RENDER_SERVICE_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
@@ -51,10 +49,6 @@ export async function syncD1Record(
     .first<Record<string, unknown>>();
   if (!row) return false;
   return firebaseSet(table, recordId, row);
-}
-
-export function aiProvider() {
-  return "openai" as const;
 }
 
 export async function currentUser() {

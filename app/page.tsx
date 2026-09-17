@@ -3,9 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeVideoInBrowser,
+  browserAiReadiness,
   detectMomentsInBrowser,
+  generateSocialCaptionInBrowser,
+  translateRowsInBrowser,
+  prepareBrowserAi,
   type BrowserAnalysis,
 } from "@/lib/browser-ai";
+import {
+  createThumbnailInBrowser,
+  renderVideoInBrowser,
+} from "@/lib/browser-media";
 import {
   ArrowLeft,
   ArrowRight,
@@ -62,6 +70,8 @@ type Clip = {
   title: string;
   hook: string;
   caption: string;
+  reason?: string;
+  category?: string;
   status: "ready" | "rendering" | "rendered";
   accent: string;
   startTime?: number;
@@ -320,6 +330,8 @@ export default function Home() {
           title: String(item.title),
           hook: String(item.hook),
           caption: String(item.caption),
+          reason: String(item.reason || ""),
+          category: String(item.category || "insight"),
           status: String(item.status) as Clip["status"],
           accent: accents[index % accents.length],
           startTime: Number(item.start_time),
@@ -528,6 +540,8 @@ export default function Home() {
             title: String(item.title),
             hook: String(item.hook),
             caption: String(item.caption),
+            reason: String(item.reason || ""),
+            category: String(item.category || "insight"),
             status: String(item.status) as Clip["status"],
             accent: accents[index % accents.length],
             startTime: Number(item.start_time),
@@ -599,23 +613,6 @@ export default function Home() {
     const controller = new AbortController();
     renderControllers.current.set(renderId, controller);
     setRenderProgress((items) => ({ ...items, [renderId]: 4 }));
-    const progressTimer = window.setInterval(async () => {
-      if (typeof clip.id !== "string") return;
-      try {
-        const response = await fetch(`/api/clips/${clip.id}/render`, {
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const result = (await response.json()) as { progress?: number };
-        if (Number.isFinite(result.progress))
-          setRenderProgress((items) => ({
-            ...items,
-            [renderId]: Math.max(items[renderId] || 0, Number(result.progress)),
-          }));
-      } catch {
-        /* render request remains authoritative */
-      }
-    }, 850);
     setClipItems((items) =>
       items.map((item) =>
         item.id === clip.id ? { ...item, status: "rendering" } : item,
@@ -623,8 +620,28 @@ export default function Home() {
     );
     try {
       if (typeof clip.id === "string") {
+        if (youtubeVideoId(clip.sourceUrl))
+          throw new Error(
+            "Untuk export video YouTube, unggah file video asli agar browser dapat mengakses frame dan audio.",
+          );
+        const blob = await renderVideoInBrowser(
+          {
+            ...clip,
+            id: clip.id,
+            startTime: clip.startTime || 0,
+            endTime: clip.endTime || clip.duration,
+          },
+          (value) =>
+            setRenderProgress((items) => ({ ...items, [renderId]: value })),
+          controller.signal,
+        );
         const response = await fetch(`/api/clips/${clip.id}/render`, {
-          method: "POST",
+          method: "PUT",
+          headers: {
+            "content-type": blob.type || "video/webm",
+            "content-length": String(blob.size),
+          },
+          body: blob,
           signal: controller.signal,
         });
         if (!response.ok)
@@ -653,7 +670,6 @@ export default function Home() {
             : "Render gagal",
       );
     } finally {
-      window.clearInterval(progressTimer);
       renderControllers.current.delete(renderId);
       setRenderingIds((items) => items.filter((id) => id !== String(clip.id)));
     }
@@ -676,7 +692,7 @@ export default function Home() {
   }
   function exportClip(clip: Clip) {
     if (typeof clip.id !== "string" || clip.status !== "rendered") {
-      setToast("Render klip terlebih dahulu sebelum mengunduh MP4");
+      setToast("Render klip terlebih dahulu sebelum mengunduh video");
       return;
     }
     window.location.assign(`/api/clips/${clip.id}/download`);
@@ -1206,7 +1222,7 @@ function Dashboard({
           <span>atau klik untuk memilih file</span>
         </div>
         <b>Create with Kliyu AI</b>
-        <small>MP4, MOV · AI aktif setelah API terhubung</small>
+        <small>MP4, MOV · Browser AI tanpa API key</small>
       </button>
       <section className="section-block">
         <div className="section-title">
@@ -1609,7 +1625,7 @@ function ClipCard({
               </>
             ) : clip.status === "rendered" ? (
               <>
-                <Download /> Export MP4
+                <Download /> Export video
               </>
             ) : (
               <>
@@ -1735,6 +1751,11 @@ function ClipPreview({
           </span>
           <h2>{clip.title}</h2>
           <p>{clip.caption}</p>
+          {clip.reason && (
+            <p className="preview-note">
+              <strong>Mengapa dipilih:</strong> {clip.reason}
+            </p>
+          )}
           {!rendered && (
             <p className="preview-note">
               Ini masih video sumber, belum hasil final. Buka Studio Lengkap
@@ -1765,7 +1786,7 @@ function ClipPreview({
             </button>
             {rendered ? (
               <a className="primary" href={`/api/clips/${clip.id}/download`}>
-                <Download /> Export MP4
+                <Download /> Export video
               </a>
             ) : (
               <button className="primary" onClick={onEdit}>
@@ -2362,6 +2383,8 @@ function SettingsPage({
     [saving, setSaving] = useState(false);
   const [active, setActive] = useState("account");
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
+  const [deviceAi] = useState(() => browserAiReadiness());
+  const [modelProgress, setModelProgress] = useState<number | null>(null);
   function jump(id: string) {
     setActive(id);
     document
@@ -2536,7 +2559,7 @@ function SettingsPage({
                 ["storage", "Media Storage R2"],
                 ["transcription", "Browser AI Transcription"],
                 ["momentDetection", "Browser AI Moment Detection"],
-                ["mp4Export", "FFmpeg MP4 Export"],
+                ["mp4Export", "Browser Video Export"],
               ].map(([key, label]) => (
                 <div key={key}>
                   <span>
@@ -2553,6 +2576,44 @@ function SettingsPage({
                 </div>
               ))}
             </div>
+            <div>
+              <small>BROWSER DEVICE CHECK</small>
+              <h2>Kesiapan AI perangkat</h2>
+            </div>
+            <div className="integration-list">
+              {[
+                ["gpu", "WebGPU acceleration"],
+                ["mediaRecorder", "Browser video renderer"],
+                ["languageModel", "Built-in language model"],
+                ["translator", "Built-in translator"],
+              ].map(([key, label]) => {
+                const ready = Boolean(deviceAi[key as keyof typeof deviceAi]);
+                return (
+                  <div key={key}>
+                    <span><b>{label}</b><small>{ready ? "Tersedia di browser ini" : "Fallback digunakan"}</small></span>
+                    <em className={ready ? "connected" : "missing"}>{ready ? "READY" : "FALLBACK"}</em>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              className="outline-button browser-model-button"
+              disabled={modelProgress !== null}
+              onClick={async () => {
+                setModelProgress(1);
+                try {
+                  await prepareBrowserAi((value) => setModelProgress(value));
+                  setModelProgress(100);
+                  notify("Model Browser AI siap digunakan");
+                  window.setTimeout(() => setModelProgress(null), 1200);
+                } catch (error) {
+                  setModelProgress(null);
+                  notify(error instanceof Error ? error.message : "Model Browser AI gagal disiapkan");
+                }
+              }}
+            >
+              <Download /> {modelProgress === null ? "Siapkan model sekarang" : `Menyiapkan ${modelProgress}%`}
+            </button>
           </section>
         </div>
       </div>
@@ -2971,9 +3032,10 @@ function ClipEditor({
         historyRef.current.push(studioSnapshot);
       if (historyRef.current.length > 40) historyRef.current.shift();
       futureRef.current = [];
+      localStorage.setItem(`kliyu-editor-draft-${clip.id}`, studioSnapshot);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [studioSnapshot]);
+  }, [studioSnapshot, clip.id]);
   function restoreStudio(value: string) {
     const state = JSON.parse(value);
     restoringRef.current = true;
@@ -3014,6 +3076,16 @@ function ClipEditor({
     if (!next) return onNotice("Belum ada perubahan untuk diulangi");
     historyRef.current.push(next);
     restoreStudio(next);
+  }
+  function restoreAutosave() {
+    const draft = localStorage.getItem(`kliyu-editor-draft-${clip.id}`);
+    if (!draft) return onNotice("Belum ada autosave untuk klip ini");
+    try {
+      restoreStudio(draft);
+      onNotice("Autosave editor berhasil dipulihkan");
+    } catch {
+      onNotice("Autosave tidak dapat dibaca");
+    }
   }
   function applyPreset(preset: (typeof builtInPresets)[number]) {
     setFontFamily(preset.fontFamily);
@@ -3088,8 +3160,10 @@ function ClipEditor({
     color: fontColor,
     ...effectStyle(titleEffect),
   };
-  const onSave = (updated: Clip) =>
+  const onSave = (updated: Clip) => {
+    localStorage.removeItem(`kliyu-editor-draft-${clip.id}`);
     persistClip({ ...updated, captionsEnabled: subtitle });
+  };
   async function uploadLogo(file?: File) {
     if (!file) return;
     setLogoName(file.name);
@@ -3135,8 +3209,34 @@ function ClipEditor({
     if (typeof clip.id !== "string") return;
     setThumbnailBusy(true);
     try {
+      if (youtubeId)
+        throw new Error("Smart Thumbnail memerlukan video asli. Unggah file video untuk menangkap frame.");
+      const thumbnail = await createThumbnailInBrowser({
+        ...clip,
+        id: clip.id,
+        title,
+        hook: hookText,
+        startTime,
+        endTime,
+        aspectRatio: ratio,
+        fontSize,
+        fontFamily,
+        fontColor,
+        fontEffect,
+        titlePosition,
+        captionPosition,
+        hookOverlay: hook,
+        captionsEnabled: subtitle,
+        watermark,
+        subtitles: subtitleRows,
+      });
       const response = await fetch(`/api/clips/${clip.id}/thumbnail`, {
         method: "POST",
+        headers: {
+          "content-type": thumbnail.type,
+          "content-length": String(thumbnail.size),
+        },
+        body: thumbnail,
       });
       if (!response.ok)
         throw new Error(
@@ -3156,10 +3256,18 @@ function ClipEditor({
     if (typeof clip.id !== "string") return;
     setTranslationBusy(true);
     try {
+      const translations = await translateRowsInBrowser(
+        subtitleRows.map((row) => ({ text: row.text })),
+        "id",
+        translationLanguage,
+      );
       const response = await fetch(`/api/clips/${clip.id}/translate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ language: translationLanguage }),
+        body: JSON.stringify({
+          language: translationLanguage,
+          translations,
+        }),
       });
       const result = (await response.json()) as {
         error?: string;
@@ -3183,8 +3291,15 @@ function ClipEditor({
     }
     setCaptionBusy(true);
     try {
+      const generated = await generateSocialCaptionInBrowser({
+        title,
+        hook: hookText,
+        transcript: subtitleRows.map((row) => row.text).join(" "),
+      });
       const response = await fetch(`/api/clips/${clip.id}/caption`, {
         method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(generated),
       });
       if (!response.ok)
         throw new Error(
@@ -3234,6 +3349,7 @@ function ClipEditor({
   function updateStudioPlayback() {
     const video = studioVideoRef.current;
     if (!video) return;
+    setStudioTime(video.currentTime);
     setCurrentSubtitle(
       subtitleRows.find(
         (item) =>
@@ -3394,6 +3510,7 @@ function ClipEditor({
             <div className="studio-toolbar">
               <button onClick={undoStudio}>Undo</button>
               <button onClick={redoStudio}>Redo</button>
+              <button onClick={restoreAutosave}>Pulihkan autosave</button>
               <button
                 className={safeArea ? "active" : ""}
                 onClick={() => setSafeArea(!safeArea)}
@@ -4035,7 +4152,7 @@ function HelpModal({
             <span>
               <strong>Masukkan video</strong>
               <small>
-                Upload MP4/MOV atau gunakan link file MP4/WebM publik.
+                Upload MP4/MOV atau gunakan link YouTube yang memiliki caption.
               </small>
             </span>
           </div>
@@ -4054,7 +4171,7 @@ function HelpModal({
             <span>
               <strong>Edit dan export</strong>
               <small>
-                Atur trim, rasio, caption, logo, lalu render menjadi MP4.
+                Atur trim, rasio, caption, logo, lalu render menjadi video siap unggah.
               </small>
             </span>
           </div>

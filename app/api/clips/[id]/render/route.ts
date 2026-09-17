@@ -42,6 +42,48 @@ export async function DELETE(
   return Response.json({ ok: true, status: "ready" });
 }
 
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const guarded = guardMutation(request, "browser-render-upload");
+  if (guarded) return guarded;
+  const user = await currentUser(),
+    { id } = await params;
+  const owned = await bindings.DB.prepare(
+    "SELECT clips.id,clips.title FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
+  )
+    .bind(id, user.id)
+    .first<{ id: string; title: string }>();
+  if (!owned) return jsonError("Clip tidak ditemukan", 404);
+  const contentType = request.headers.get("content-type") || "";
+  if (!/^video\/(mp4|webm)(?:;|$)/.test(contentType))
+    return jsonError("Format hasil browser harus MP4 atau WebM", 415);
+  if (!request.body) return jsonError("File hasil render kosong");
+  const extension = contentType.startsWith("video/mp4") ? "mp4" : "webm";
+  const key = `exports/${user.id}/${id}.${extension}`;
+  await bindings.MEDIA.put(key, request.body, { httpMetadata: { contentType } });
+  await bindings.DB.prepare(
+    "UPDATE clips SET status='rendered',rendered_key=?,render_job_id=NULL,render_progress=100,render_error=NULL,updated_at=? WHERE id=?",
+  )
+    .bind(key, Date.now(), id)
+    .run();
+  await syncD1Record("clips", id);
+  await bindings.DB.prepare(
+    "INSERT INTO notifications (id,user_id,type,title,message,read,created_at) VALUES (?,?,?,?,?,0,?)",
+  )
+    .bind(
+      `note_${crypto.randomUUID()}`,
+      user.id,
+      "export",
+      "Export browser selesai",
+      `${owned.title} siap diunduh.`,
+      Date.now(),
+    )
+    .run();
+  return Response.json({ ok: true, status: "rendered", downloadUrl: `/api/clips/${id}/download` });
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },

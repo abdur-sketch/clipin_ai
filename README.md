@@ -11,7 +11,7 @@
 - My Clips: All, Hot, Ready, Exported
 - Kliyu Studio: timeline dua-handle, Undo/Redo, zoom, safe area, editor subtitle, Karaoke per kata, preset visual, animasi judul, smart silence cleanup, dan tracking wajah bergerak
 - AI Caption: hook, caption, CTA, hashtag, dan copy sekali klik
-- Export MP4 melalui antrean FFmpeg dengan progress aktual, cancel, retry, H.264/AAC, dan normalisasi audio
+- Export video langsung di browser dengan crop, overlay, subtitle, watermark, progress, dan cancel; MP4 digunakan bila browser mendukungnya, dengan WebM sebagai fallback aman
 - Manajemen project: rename, duplicate, dan delete beserta aset terkait
 - Publikasi manual atau langsung melalui adapter OAuth eksternal
 - Published tracker untuk URL, views, likes, comments, shares, dan followers gained
@@ -40,7 +40,7 @@ Tidak ada Ollama, Whisper server, tunnel, atau API key yang dibutuhkan untuk pro
 
 ## Konfigurasi produksi
 
-Proses transkripsi dan pemilihan momen tidak memerlukan konfigurasi server. `OPENAI_API_KEY` bersifat opsional untuk fitur copywriting atau terjemahan cloud. Untuk deployment produksi, `RENDER_SERVICE_URL` dapat menunjuk ke layanan media eksternal. Endpoint `POST {RENDER_SERVICE_URL}/render` menerima konfigurasi clip sebagai JSON dan harus mengembalikan salah satu dari:
+Proses transkripsi, pemilihan momen, pembuatan caption sosial, terjemahan, thumbnail, dan render video berjalan langsung di browser tanpa API key. Chrome/Edge terbaru direkomendasikan untuk dukungan Built-in AI dan format video terbaik. `RENDER_SERVICE_URL` tetap opsional sebagai jalur render cloud cadangan. Endpoint `POST {RENDER_SERVICE_URL}/render` menerima konfigurasi clip sebagai JSON dan harus mengembalikan salah satu dari:
 
 - respons body video (`video/mp4`), atau
 - JSON `{ "downloadUrl": "https://.../result.mp4" }`.

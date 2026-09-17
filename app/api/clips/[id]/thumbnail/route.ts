@@ -37,8 +37,20 @@ export async function POST(
   const { id } = await params;
   const clip = await ownedClip(id, user.id);
   if (!clip) return jsonError("Clip tidak ditemukan", 404);
-  return jsonError(
-    "Thumbnail sekarang dibuat langsung di Browser Studio. Buka editor klip untuk menangkap frame.",
-    409,
-  );
+  const contentType = request.headers.get("content-type") || "";
+  if (!/^image\/(jpeg|png|webp)$/.test(contentType))
+    return jsonError("Thumbnail harus berupa JPG, PNG, atau WebP", 415);
+  const size = Number(request.headers.get("content-length") || 0);
+  if (size > 8 * 1024 * 1024)
+    return jsonError("Ukuran thumbnail maksimum 8 MB", 413);
+  if (!request.body) return jsonError("Thumbnail kosong");
+  const extension = contentType === "image/jpeg" ? "jpg" : contentType.split("/")[1];
+  const key = `thumbnails/${user.id}/${id}.${extension}`;
+  await bindings.MEDIA.put(key, request.body, { httpMetadata: { contentType } });
+  await bindings.DB.prepare(
+    "UPDATE clips SET thumbnail_key=?,updated_at=? WHERE id=?",
+  )
+    .bind(key, Date.now(), id)
+    .run();
+  return Response.json({ ok: true, downloadUrl: `/api/clips/${id}/thumbnail` });
 }
