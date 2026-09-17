@@ -66,6 +66,9 @@ type View =
   | "settings";
 type Clip = {
   id: number | string;
+  projectId?: string;
+  hasSourceMedia?: boolean;
+  sourceType?: string;
   score: number;
   duration: number;
   title: string;
@@ -325,6 +328,9 @@ export default function Home() {
       setClipItems(
         detail.clips.map((item, index) => ({
           id: String(item.id),
+          projectId: String(item.project_id || projectId),
+          hasSourceMedia: Boolean(detail.project.storage_key),
+          sourceType: String(detail.project.source_type || "upload"),
           score: Number(item.score),
           duration: Math.max(
             1,
@@ -567,6 +573,9 @@ export default function Home() {
         setClipItems(
           detail.clips.map((item, index) => ({
             id: String(item.id),
+            projectId: String(item.project_id || project.id),
+            hasSourceMedia: Boolean(detail.project.storage_key),
+            sourceType: String(detail.project.source_type || "upload"),
             score: Number(item.score),
             duration: Math.max(
               1,
@@ -655,7 +664,7 @@ export default function Home() {
     );
     try {
       if (typeof clip.id === "string") {
-        if (youtubeVideoId(clip.sourceUrl))
+        if (youtubeVideoId(clip.sourceUrl) && !clip.hasSourceMedia)
           throw new Error(
             "Untuk export video YouTube, unggah file video asli agar browser dapat mengakses frame dan audio.",
           );
@@ -1676,8 +1685,9 @@ function ClipCard({
 
 function ClipThumbnail({ clip }: { clip: Clip }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [failed, setFailed] = useState(false);
   const youtubeId = youtubeVideoId(clip.sourceUrl);
-  if (youtubeId)
+  if (youtubeId && !clip.hasSourceMedia)
     return (
       <div
         className="clip-card-video"
@@ -1694,7 +1704,12 @@ function ClipThumbnail({ clip }: { clip: Clip }) {
     clip.status === "rendered"
       ? `/api/clips/${clip.id}/media`
       : `/api/clips/${clip.id}/media?source=1`;
-  return (
+  return failed ? (
+    <div className="clip-media-missing">
+      <FileVideo2 />
+      <span>Video sumber perlu dipasang</span>
+    </div>
+  ) : (
     <video
       ref={ref}
       className="clip-card-video"
@@ -1702,6 +1717,7 @@ function ClipThumbnail({ clip }: { clip: Clip }) {
       muted
       playsInline
       preload="metadata"
+      onError={() => setFailed(true)}
       onLoadedMetadata={() => {
         if (ref.current && clip.status !== "rendered")
           ref.current.currentTime = clip.startTime || 0;
@@ -1720,6 +1736,7 @@ function ClipPreview({
   onEdit: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [mediaFailed, setMediaFailed] = useState(false);
   const rendered = clip.status === "rendered";
   const youtubeId = youtubeVideoId(clip.sourceUrl);
   function positionPreview() {
@@ -1757,7 +1774,7 @@ function ClipPreview({
           <X />
         </button>
         <div className={`preview-stage ${clip.accent}`}>
-          {youtubeId && !rendered ? (
+          {youtubeId && !clip.hasSourceMedia && !rendered ? (
             <iframe
               className={`real-clip-video ratio-${(clip.aspectRatio || "9:16").replace(":", "-")}`}
               src={`https://www.youtube-nocookie.com/embed/${youtubeId}?start=${Math.floor(clip.startTime || 0)}&end=${Math.ceil(clip.endTime || 0)}&rel=0`}
@@ -1773,11 +1790,22 @@ function ClipPreview({
               controls
               playsInline
               preload="metadata"
+              onError={() => setMediaFailed(true)}
               onLoadedMetadata={positionPreview}
               onTimeUpdate={stopAtClipEnd}
             >
               Browser Anda tidak mendukung pemutar video.
             </video>
+          )}
+          {mediaFailed && (
+            <div className="preview-media-error" role="alert">
+              <FileVideo2 />
+              <b>Video sumber tidak ditemukan</b>
+              <small>
+                Buka Studio lalu pilih video asli untuk mengaktifkan preview dan
+                render.
+              </small>
+            </div>
           )}
         </div>
         <div className="preview-details">
@@ -2981,6 +3009,14 @@ function ClipEditor({
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("en");
   const [translationBusy, setTranslationBusy] = useState(false);
+  const [sourceAttached, setSourceAttached] = useState(
+    clip.hasSourceMedia ?? false,
+  );
+  const [mediaState, setMediaState] = useState<
+    "loading" | "ready" | "missing"
+  >(youtubeId && !clip.hasSourceMedia ? "ready" : "loading");
+  const [mediaVersion, setMediaVersion] = useState(0);
+  const [sourceUploadBusy, setSourceUploadBusy] = useState(false);
   const studioVideoRef = useRef<HTMLVideoElement>(null);
   const [startTime, setStartTime] = useState(clip.startTime ?? 0);
   const [endTime, setEndTime] = useState(clip.endTime ?? clip.duration);
@@ -3285,6 +3321,39 @@ function ClipEditor({
       onNotice(error instanceof Error ? error.message : "Upload B-roll gagal");
     }
   }
+  async function attachSourceVideo(file?: File) {
+    if (!file) return;
+    if (!clip.projectId) {
+      onNotice("Project sumber tidak ditemukan. Buat project baru dari video asli.");
+      return;
+    }
+    setSourceUploadBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${clip.projectId}/upload`, {
+        method: "PUT",
+        headers: {
+          "content-type": file.type || "video/mp4",
+          "content-length": String(file.size),
+        },
+        body: file,
+      });
+      if (!response.ok)
+        throw new Error(
+          (await response.json()).error || "Video sumber gagal dipasang",
+        );
+      setSourceAttached(true);
+      setMediaState("loading");
+      setMediaVersion((value) => value + 1);
+      onNotice("Video sumber terpasang. Preview dan render sekarang aktif.");
+    } catch (error) {
+      setMediaState("missing");
+      onNotice(
+        error instanceof Error ? error.message : "Video sumber gagal dipasang",
+      );
+    } finally {
+      setSourceUploadBusy(false);
+    }
+  }
   async function generateThumbnail() {
     if (typeof clip.id !== "string") return;
     setThumbnailBusy(true);
@@ -3527,7 +3596,7 @@ function ClipEditor({
               {safeArea && (
                 <span className="platform-safe-area" aria-hidden="true" />
               )}
-              {youtubeId ? (
+              {youtubeId && !sourceAttached ? (
                 <iframe
                   className="studio-source-video"
                   src={`https://www.youtube-nocookie.com/embed/${youtubeId}?start=${Math.floor(startTime)}&end=${Math.ceil(endTime)}&rel=0`}
@@ -3539,19 +3608,48 @@ function ClipEditor({
                 <video
                   ref={studioVideoRef}
                   className="studio-source-video"
-                  src={`/api/clips/${clip.id}/media?source=1`}
+                  src={`/api/clips/${clip.id}/media?source=1&v=${mediaVersion}`}
                   playsInline
                   preload="metadata"
                   onLoadedMetadata={() => {
                     if (studioVideoRef.current) {
+                      setMediaState("ready");
                       setVideoDuration(
                         studioVideoRef.current.duration || endTime,
                       );
                       studioVideoRef.current.currentTime = startTime;
                     }
                   }}
+                  onError={() => setMediaState("missing")}
                   onTimeUpdate={updateStudioPlayback}
                 />
+              )}
+              {(!youtubeId || sourceAttached) && mediaState === "loading" && (
+                <div className="source-media-state" role="status">
+                  <RefreshCw className="spin" />
+                  <b>Memuat video sumber…</b>
+                </div>
+              )}
+              {(!youtubeId || sourceAttached) && mediaState === "missing" && (
+                <div className="source-media-state source-media-missing" role="alert">
+                  <FileVideo2 />
+                  <b>Video sumber belum tersedia</b>
+                  <small>
+                    Pasang video asli project ini agar preview dan render bekerja.
+                  </small>
+                  {clip.projectId && (
+                    <label>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm"
+                        onChange={(event) =>
+                          attachSourceVideo(event.target.files?.[0])
+                        }
+                      />
+                      {sourceUploadBusy ? "Mengunggah…" : "Pilih video asli"}
+                    </label>
+                  )}
+                </div>
               )}
               {hook && (
                 <span
@@ -3588,12 +3686,14 @@ function ClipEditor({
               {logoName && (
                 <span className="studio-logo">{logoName.slice(0, 12)}</span>
               )}
-              <button
-                aria-label={playing ? "Pause preview" : "Play preview"}
-                onClick={toggleStudioPlayback}
-              >
-                {playing ? <Pause /> : <Play />}
-              </button>
+              {(!youtubeId || sourceAttached) && mediaState === "ready" && (
+                <button
+                  aria-label={playing ? "Pause preview" : "Play preview"}
+                  onClick={toggleStudioPlayback}
+                >
+                  {playing ? <Pause /> : <Play />}
+                </button>
+              )}
             </div>
             <div className="timeline">
               <span>{Math.round(startTime)}s</span>
@@ -3676,6 +3776,30 @@ function ClipEditor({
             </div>
           </div>
           <div className="editor-controls">
+            {youtubeId && !sourceAttached && (
+              <section className="source-required-card">
+                <FileVideo2 />
+                <div>
+                  <b>Pasang video asli untuk hasil final</b>
+                  <small>
+                    Link YouTube dipakai untuk analisis caption. Browser tidak dapat
+                    mengekspor frame dan audio YouTube langsung.
+                  </small>
+                </div>
+                {clip.projectId && (
+                  <label>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm"
+                      onChange={(event) =>
+                        attachSourceVideo(event.target.files?.[0])
+                      }
+                    />
+                    {sourceUploadBusy ? "Mengunggah…" : "Pilih video asli"}
+                  </label>
+                )}
+              </section>
+            )}
             <section className="studio-quick-tools">
               <div>
                 <span>FITUR CREATOR BARU</span>
@@ -4255,6 +4379,7 @@ function ClipEditor({
                     postCaption,
                     postCta,
                     postHashtags,
+                    hasSourceMedia: sourceAttached,
                     subtitles: subtitleRows,
                   })
                 }

@@ -179,6 +179,20 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
   assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
 });
 
+test("Studio reports missing source media and lets the creator attach the original video", async () => {
+  const [page, uploadApi] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/projects/[id]/upload/route.ts"),
+  ]);
+  assert.match(page, /Video sumber belum tersedia/);
+  assert.match(page, /Pasang video asli untuk hasil final/);
+  assert.match(page, /attachSourceVideo/);
+  assert.match(page, /hasSourceMedia/);
+  assert.match(page, /onError=\{\(\) => setMediaState\("missing"\)\}/);
+  assert.match(uploadApi, /bindings\.MEDIA\.put/);
+  assert.match(uploadApi, /storage_key/);
+});
+
 test("advanced Studio tools persist and reach the cloud render adapter", async () => {
   const [page, clipApi, renderApi, migration] =
     await Promise.all([
