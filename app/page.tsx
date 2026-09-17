@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  analyzeVideoInBrowser,
+  detectMomentsInBrowser,
+  type BrowserAnalysis,
+} from "@/lib/browser-ai";
+import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -61,6 +66,7 @@ type Clip = {
   accent: string;
   startTime?: number;
   endTime?: number;
+  sourceUrl?: string;
   style?: string;
   faceTracking?: boolean;
   hookOverlay?: boolean;
@@ -94,6 +100,22 @@ type Clip = {
     words?: { start: number; end: number; word: string }[];
   }[];
 };
+
+function youtubeVideoId(value?: string) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (url.hostname === "youtu.be") return url.pathname.slice(1).split("/")[0];
+    if (url.hostname.endsWith("youtube.com")) {
+      if (url.pathname.startsWith("/shorts/"))
+        return url.pathname.split("/")[2] || "";
+      return url.searchParams.get("v") || "";
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
 
 const demoClips: Clip[] = [
   {
@@ -283,6 +305,9 @@ export default function Home() {
         clips: Record<string, unknown>[];
       };
       const accents = ["lime", "cyan", "violet", "orange", "pink", "blue"];
+      const sourceUrl = detail.project.source_url
+        ? String(detail.project.source_url)
+        : undefined;
       setProjectTitle(String(detail.project.title || "My Clips"));
       setClipItems(
         detail.clips.map((item, index) => ({
@@ -299,6 +324,7 @@ export default function Home() {
           accent: accents[index % accents.length],
           startTime: Number(item.start_time),
           endTime: Number(item.end_time),
+          sourceUrl,
           style: String(item.style || "bold"),
           faceTracking: Boolean(item.face_tracking),
           hookOverlay: Boolean(item.hook_overlay),
@@ -349,20 +375,76 @@ export default function Home() {
   }
 
   async function retryProject(project: ProjectSummary) {
-    setToast(`Memproses ulang “${project.title}”…`);
-    const response = await fetch(`/api/projects/${project.id}/process`, {
-      method: "POST",
-    });
-    const result = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    await loadProjects();
-    if (!response.ok) {
-      setToast(result.error || "Pemrosesan ulang gagal");
-      return;
+    setToast(`Browser AI memproses ulang “${project.title}”…`);
+    setProcessing(true);
+    setProgress(12);
+    try {
+      const browserAnalysis = await analyzeProjectInBrowser(project.id);
+      const response = await fetch(`/api/projects/${project.id}/process`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ browserAnalysis }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "Pemrosesan ulang gagal");
+      await loadProjects();
+      setProgress(100);
+      setToast("Analisis Browser AI selesai. Klip berhasil dibuat.");
+      await openProject(project.id);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Pemrosesan ulang gagal");
+    } finally {
+      setProcessing(false);
     }
-    setToast("Analisis selesai. Klip berhasil dibuat.");
-    await openProject(project.id);
+  }
+
+  async function analyzeProjectInBrowser(
+    projectId: string,
+    originalFile?: File,
+  ): Promise<BrowserAnalysis> {
+    if (originalFile)
+      return analyzeVideoInBrowser(originalFile, (value) => setProgress(value));
+    const detailResponse = await fetch(`/api/projects/${projectId}`);
+    if (!detailResponse.ok) throw new Error("Project tidak dapat dibaca");
+    const detail = (await detailResponse.json()) as {
+      project: { source_type?: string; filename?: string; content_type?: string };
+    };
+    if (detail.project.source_type === "youtube") {
+      setProgress(34);
+      const captionResponse = await fetch(`/api/projects/${projectId}/captions`);
+      const captions = (await captionResponse.json()) as {
+        transcript?: string;
+        segments?: BrowserAnalysis["segments"];
+        provider?: BrowserAnalysis["provider"];
+        error?: string;
+      };
+      if (!captionResponse.ok || !captions.transcript || !captions.segments)
+        throw new Error(captions.error || "Caption YouTube tidak tersedia");
+      const moments = await detectMomentsInBrowser(
+        captions.transcript,
+        captions.segments,
+        (value) => setProgress(value),
+      );
+      return {
+        transcript: captions.transcript,
+        segments: captions.segments,
+        moments,
+        provider: "source-captions",
+      };
+    }
+    setProgress(20);
+    const mediaResponse = await fetch(`/api/projects/${projectId}/media`);
+    if (!mediaResponse.ok)
+      throw new Error(
+        "Video asli tidak ditemukan. Buat project baru dan pilih file video kembali.",
+      );
+    const blob = await mediaResponse.blob();
+    const file = new File([blob], detail.project.filename || "video.mp4", {
+      type: detail.project.content_type || blob.type || "video/mp4",
+    });
+    return analyzeVideoInBrowser(file, (value) => setProgress(value));
   }
 
   const filtered = useMemo(
@@ -416,8 +498,11 @@ export default function Home() {
           throw new Error((await uploaded.json()).error || "Upload gagal");
         setProgress(52);
       }
+      const browserAnalysis = await analyzeProjectInBrowser(project.id, file);
       const processed = await fetch(`/api/projects/${project.id}/process`, {
         method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ browserAnalysis }),
       });
       if (!processed.ok)
         throw new Error((await processed.json()).error || "Analisis gagal");
@@ -428,6 +513,9 @@ export default function Home() {
           clips: Record<string, unknown>[];
         };
         const accents = ["lime", "cyan", "violet", "orange", "pink", "blue"];
+        const sourceUrl = detail.project.source_url
+          ? String(detail.project.source_url)
+          : undefined;
         setProjectTitle(String(detail.project.title || title));
         setClipItems(
           detail.clips.map((item, index) => ({
@@ -444,6 +532,7 @@ export default function Home() {
             accent: accents[index % accents.length],
             startTime: Number(item.start_time),
             endTime: Number(item.end_time),
+            sourceUrl,
             style: String(item.style || "bold"),
             faceTracking: Boolean(item.face_tracking),
             hookOverlay: Boolean(item.hook_overlay),
@@ -1494,7 +1583,7 @@ function ClipCard({
         {rendering && (
           <div className="render-progress">
             <span style={{ width: `${progress}%` }} />
-            <b>{progress}% · antrean lokal</b>
+            <b>{progress}% · proses render</b>
           </div>
         )}
         <div className="clip-actions">
@@ -1536,6 +1625,20 @@ function ClipCard({
 
 function ClipThumbnail({ clip }: { clip: Clip }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const youtubeId = youtubeVideoId(clip.sourceUrl);
+  if (youtubeId)
+    return (
+      <div
+        className="clip-card-video"
+        role="img"
+        aria-label={`Thumbnail ${clip.title}`}
+        style={{
+          backgroundImage: `url(https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg)`,
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+        }}
+      />
+    );
   const source =
     clip.status === "rendered"
       ? `/api/clips/${clip.id}/media`
@@ -1567,6 +1670,7 @@ function ClipPreview({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const rendered = clip.status === "rendered";
+  const youtubeId = youtubeVideoId(clip.sourceUrl);
   function positionPreview() {
     if (!rendered && videoRef.current)
       videoRef.current.currentTime = clip.startTime || 0;
@@ -1602,18 +1706,28 @@ function ClipPreview({
           <X />
         </button>
         <div className={`preview-stage ${clip.accent}`}>
-          <video
-            ref={videoRef}
-            className={`real-clip-video ratio-${(clip.aspectRatio || "9:16").replace(":", "-")}`}
-            src={`/api/clips/${clip.id}/media`}
-            controls
-            playsInline
-            preload="metadata"
-            onLoadedMetadata={positionPreview}
-            onTimeUpdate={stopAtClipEnd}
-          >
-            Browser Anda tidak mendukung pemutar video.
-          </video>
+          {youtubeId && !rendered ? (
+            <iframe
+              className={`real-clip-video ratio-${(clip.aspectRatio || "9:16").replace(":", "-")}`}
+              src={`https://www.youtube-nocookie.com/embed/${youtubeId}?start=${Math.floor(clip.startTime || 0)}&end=${Math.ceil(clip.endTime || 0)}&rel=0`}
+              title={`Preview ${clip.title}`}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              className={`real-clip-video ratio-${(clip.aspectRatio || "9:16").replace(":", "-")}`}
+              src={`/api/clips/${clip.id}/media`}
+              controls
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={positionPreview}
+              onTimeUpdate={stopAtClipEnd}
+            >
+              Browser Anda tidak mendukung pemutar video.
+            </video>
+          )}
         </div>
         <div className="preview-details">
           <span className="modal-kicker">
@@ -2420,8 +2534,8 @@ function SettingsPage({
               {[
                 ["firebase", "Firebase Firestore"],
                 ["storage", "Media Storage R2"],
-                ["transcription", "Whisper Transcription"],
-                ["momentDetection", "KLIYU Moment Detection"],
+                ["transcription", "Browser AI Transcription"],
+                ["momentDetection", "Browser AI Moment Detection"],
                 ["mp4Export", "FFmpeg MP4 Export"],
               ].map(([key, label]) => (
                 <div key={key}>
@@ -2466,10 +2580,10 @@ function UploadModal({
   const [linkError, setLinkError] = useState("");
   const [projectName, setProjectName] = useState("");
   const steps = [
-    sourceMode === "link" ? "Mengimpor link video" : "Mengunggah video",
-    "Mengekstrak audio",
-    "Membuat transkrip",
-    "Mendeteksi momen terbaik",
+    sourceMode === "link" ? "Membaca caption YouTube" : "Mengunggah video",
+    "Menyiapkan model di browser",
+    "Membuat transkrip privat",
+    "Browser AI memilih momen",
   ];
   const activeStep = Math.min(Math.floor(progress / 26), 3);
 
@@ -2478,6 +2592,13 @@ function UploadModal({
     try {
       const parsed = new URL(value);
       if (!/^https?:$/.test(parsed.protocol)) throw new Error();
+      if (
+        !/(^|\.)youtube\.com$/i.test(parsed.hostname) &&
+        !/(^|\.)youtu\.be$/i.test(parsed.hostname)
+      ) {
+        setLinkError("Saat ini link Browser AI mendukung YouTube. Untuk sumber lain, unggah file videonya.");
+        return;
+      }
       setLinkError("");
       onStart(value, projectName);
     } catch {
@@ -2515,8 +2636,8 @@ function UploadModal({
               <em>Klip terbaik keluar.</em>
             </h2>
             <p>
-              Pilih video asli dari perangkat atau tempel link video yang dapat
-              diakses publik.
+              AI berjalan langsung di browser. Pilih video asli atau tempel
+              link YouTube yang memiliki caption.
             </p>
             {error && <div className="upload-error-banner">{error}</div>}
             <label className="project-name-field">
@@ -2568,7 +2689,7 @@ function UploadModal({
                     <UploadCloud />
                   </span>
                   <strong>Pilih atau drop video asli</strong>
-                  <small>MP4 atau MOV · hingga 512 MB dengan AI lokal</small>
+                  <small>MP4 atau MOV · diproses privat dengan Browser AI</small>
                 </button>
                 <input
                   ref={inputRef}
@@ -2584,7 +2705,7 @@ function UploadModal({
             ) : (
               <div className="link-source-panel">
                 <label htmlFor="new-project-video-link">
-                  Link video YouTube, TikTok, Instagram, atau file langsung
+                  Link video YouTube
                 </label>
                 <div
                   className={`video-link-input ${linkError ? "invalid" : ""}`}
@@ -2674,6 +2795,7 @@ function ClipEditor({
   onSave: (clip: Clip) => void;
   onNotice: (message: string) => void;
 }) {
+  const youtubeId = youtubeVideoId(clip.sourceUrl);
   const [title, setTitle] = useState(clip.title);
   const [hookText, setHookText] = useState(clip.hook);
   const [subtitle, setSubtitle] = useState(clip.captionsEnabled ?? true);
@@ -3146,22 +3268,32 @@ function ClipEditor({
               {safeArea && (
                 <span className="platform-safe-area" aria-hidden="true" />
               )}
-              <video
-                ref={studioVideoRef}
-                className="studio-source-video"
-                src={`/api/clips/${clip.id}/media?source=1`}
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={() => {
-                  if (studioVideoRef.current) {
-                    setVideoDuration(
-                      studioVideoRef.current.duration || endTime,
-                    );
-                    studioVideoRef.current.currentTime = startTime;
-                  }
-                }}
-                onTimeUpdate={updateStudioPlayback}
-              />
+              {youtubeId ? (
+                <iframe
+                  className="studio-source-video"
+                  src={`https://www.youtube-nocookie.com/embed/${youtubeId}?start=${Math.floor(startTime)}&end=${Math.ceil(endTime)}&rel=0`}
+                  title={`Sumber ${clip.title}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <video
+                  ref={studioVideoRef}
+                  className="studio-source-video"
+                  src={`/api/clips/${clip.id}/media?source=1`}
+                  playsInline
+                  preload="metadata"
+                  onLoadedMetadata={() => {
+                    if (studioVideoRef.current) {
+                      setVideoDuration(
+                        studioVideoRef.current.duration || endTime,
+                      );
+                      studioVideoRef.current.currentTime = startTime;
+                    }
+                  }}
+                  onTimeUpdate={updateStudioPlayback}
+                />
+              )}
               {hook && (
                 <span
                   className={`hook-overlay title-${titlePosition} title-anim-${titleAnimation} font-effect-${titleEffect}`}

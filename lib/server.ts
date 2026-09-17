@@ -5,14 +5,8 @@ import { firebaseGet, firebaseSet } from "@/lib/firebase";
 type AppEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
-  AI_PROVIDER?: "openai" | "ollama";
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
-  OLLAMA_BASE_URL?: string;
-  OLLAMA_MODEL?: string;
-  WHISPER_BASE_URL?: string;
-  LOCAL_RENDER_BASE_URL?: string;
-  LOCAL_AI_TOKEN?: string;
   RENDER_SERVICE_URL?: string;
   RENDER_SERVICE_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
@@ -60,20 +54,7 @@ export async function syncD1Record(
 }
 
 export function aiProvider() {
-  if (bindings.AI_PROVIDER === "ollama") return "ollama" as const;
-  if (bindings.AI_PROVIDER === "openai") return "openai" as const;
-  if (bindings.OLLAMA_BASE_URL || bindings.WHISPER_BASE_URL)
-    return "ollama" as const;
   return "openai" as const;
-}
-
-export function localAiHeaders(extra: Record<string, string> = {}) {
-  return {
-    ...extra,
-    ...(bindings.LOCAL_AI_TOKEN
-      ? { authorization: `Bearer ${bindings.LOCAL_AI_TOKEN}` }
-      : {}),
-  };
 }
 
 export async function currentUser() {

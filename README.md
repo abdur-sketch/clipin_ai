@@ -1,13 +1,13 @@
 # KLIYU
 
-**Create Your Moment.** KLIYU mengubah video panjang menjadi short content yang layak dibagikan melalui transkripsi, deteksi momen AI, penyuntingan cepat, dan export MP4.
+**Create Your Moment.** KLIYU mengubah video panjang menjadi short content dengan Browser AI yang berjalan langsung pada perangkat pengguna.
 
 ## MVP v1.0
 
 - Personal workspace dengan Sign in with ChatGPT
-- Upload MP4/MOV, impor file video publik, atau ambil video milik Anda dari YouTube/Instagram/TikTok pada mode lokal
-- Transkripsi bertimestamp per kata melalui OpenAI Whisper atau estimasi berbobot dari whisper.cpp lokal
-- Kliyu AI moment detection memakai OpenAI Responses API atau Ollama lokal dengan structured output
+- Upload MP4/MOV atau gunakan link YouTube yang memiliki caption
+- Transkripsi Whisper multilingual langsung di browser melalui WebGPU dengan fallback WebAssembly
+- Deteksi momen memakai Browser AI bawaan bila tersedia, dengan ranking deterministik sebagai fallback
 - My Clips: All, Hot, Ready, Exported
 - Kliyu Studio: timeline dua-handle, Undo/Redo, zoom, safe area, editor subtitle, Karaoke per kata, preset visual, animasi judul, smart silence cleanup, dan tracking wajah bergerak
 - AI Caption: hook, caption, CTA, hashtag, dan copy sekali klik
@@ -34,32 +34,13 @@ npm run lint
 npm test
 ```
 
-## AI lokal gratis (macOS)
+## Browser AI
 
-Mode lokal menjalankan Ollama untuk analisis momen/caption dan whisper.cpp untuk transkripsi. Data video dan transkrip tidak dikirim ke penyedia AI berbayar.
-
-```bash
-npm run local-ai:setup
-npm run dev
-```
-
-Setup menginstal `ollama`, `whisper-cpp`, `ffmpeg`, dan `yt-dlp` melalui Homebrew, lalu mengunduh model `qwen2.5:1.5b` dan Whisper multilingual `base`. Gunakan hanya video milik Anda atau video yang memang Anda berhak proses. Pada penggunaan berikutnya:
-
-```bash
-npm run local-ai:start
-npm run local-ai:check
-npm run dev
-```
-
-Perintah `npm run dev` juga memastikan seluruh layanan lokal aktif dan memakai port 3000 secara tetap. Jika browser pernah menampilkan overlay Vite setelah server berhenti, tutup overlay lalu muat ulang `http://localhost:3000` setelah perintah ini menampilkan status `Local`.
-
-Mode ini hanya tersedia saat aplikasi berjalan lokal di Mac karena deployment cloud tidak dapat mengakses `127.0.0.1`. Untuk mematikan proses latar belakang yang dijalankan KLIYU gunakan `npm run local-ai:stop`.
+Tidak ada Ollama, Whisper server, tunnel, atau API key yang dibutuhkan untuk proses utama. Model Whisper dimuat dan disimpan oleh browser saat pertama kali digunakan. Chrome/Edge dengan WebGPU memberikan performa terbaik; browser tanpa WebGPU otomatis memakai WebAssembly. Untuk link YouTube, KLIYU membaca caption sumber. Jika caption tidak tersedia, unggah file video aslinya.
 
 ## Konfigurasi produksi
 
-`AI_PROVIDER=ollama` memakai `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, dan `WHISPER_BASE_URL`. `AI_PROVIDER=openai` memakai `OPENAI_API_KEY` dan `OPENAI_MODEL`. Untuk mode lokal, `LOCAL_RENDER_BASE_URL=http://127.0.0.1:8789` mengaktifkan ekspor MP4 melalui FFmpeg yang ikut dijalankan oleh `npm run local-ai:start`.
-
-Untuk deployment produksi, `RENDER_SERVICE_URL` menunjuk ke layanan media eksternal. Endpoint `POST {RENDER_SERVICE_URL}/render` menerima konfigurasi clip sebagai JSON dan harus mengembalikan salah satu dari:
+Proses transkripsi dan pemilihan momen tidak memerlukan konfigurasi server. `OPENAI_API_KEY` bersifat opsional untuk fitur copywriting atau terjemahan cloud. Untuk deployment produksi, `RENDER_SERVICE_URL` dapat menunjuk ke layanan media eksternal. Endpoint `POST {RENDER_SERVICE_URL}/render` menerima konfigurasi clip sebagai JSON dan harus mengembalikan salah satu dari:
 
 - respons body video (`video/mp4`), atau
 - JSON `{ "downloadUrl": "https://.../result.mp4" }`.

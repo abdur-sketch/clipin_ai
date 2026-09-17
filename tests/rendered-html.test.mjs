@@ -30,14 +30,14 @@ test("build contains the KLIYU MVP product", async () => {
   );
 });
 
-test("local development prevents recursive Vite websocket error overlays", async () => {
+test("development starts without local AI daemons", async () => {
   const [viteConfig, packageJson] = await Promise.all([
     source("vite.config.ts"),
     source("package.json"),
   ]);
   assert.match(viteConfig, /forwardConsole:\s*false/);
   assert.match(viteConfig, /strictPort:\s*true/);
-  assert.match(packageJson, /start-local-ai\.sh/);
+  assert.doesNotMatch(packageJson, /local-ai|start-local-ai/);
 });
 
 test("Firebase Firestore is securely connected for core creator data", async () => {
@@ -62,7 +62,7 @@ test("Firebase Firestore is securely connected for core creator data", async () 
   assert.match(rules, /allow read, write: if false/);
 });
 
-test("new project accepts original files and honest direct video links", async () => {
+test("new project accepts original files and supported YouTube links", async () => {
   const [page, projectsApi, processApi] = await Promise.all([
     source("app/page.tsx"),
     source("app/api/projects/route.ts"),
@@ -74,33 +74,31 @@ test("new project accepts original files and honest direct video links", async (
   );
   assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
-  assert.match(page, /Link video YouTube, TikTok, Instagram/);
-  assert.match(page, /MP4\/WebM publik/);
+  assert.match(page, /Link video YouTube/);
+  assert.match(page, /Browser AI/);
   assert.doesNotMatch(page, /Gunakan video contoh/);
   assert.match(projectsApi, /Link video tidak valid/);
-  assert.match(processApi, /contentType\.startsWith\("video\/"\)/);
-  assert.match(processApi, /\/import/);
-  assert.match(processApi, /LOCAL_RENDER_BASE_URL/);
-  assert.match(processApi, /512 \* 1024 \* 1024/);
-  assert.match(await source("scripts/local-render-server.mjs"), /height<=480/);
-  assert.match(await source("scripts/local-render-server.mjs"), /500M/);
+  assert.match(processApi, /browserAnalysis/);
+  assert.match(processApi, /provider: "browser"/);
 });
 
-test("local YouTube AI processing avoids worker memory limits and failed projects can retry", async () => {
-  const [gateway, renderer, processApi, projectApi, page] = await Promise.all([
-    source("scripts/local-ai-gateway.mjs"),
-    source("scripts/local-render-server.mjs"),
+test("Browser AI transcribes privately and YouTube captions avoid server AI", async () => {
+  const [browserAi, captionsApi, processApi, projectApi, page, server] = await Promise.all([
+    source("lib/browser-ai.ts"),
+    source("app/api/projects/[id]/captions/route.ts"),
     source("app/api/projects/[id]/process/route.ts"),
     source("app/api/projects/[id]/route.ts"),
     source("app/page.tsx"),
+    source("lib/server.ts"),
   ]);
-  assert.match(gateway, /transcribe-url/);
-  assert.match(renderer, /request\.url === "\/transcribe-url"/);
-  assert.match(renderer, /yt-dlp/);
-  assert.match(renderer, /youtube-captions/);
-  assert.match(renderer, /--write-auto-subs/);
-  assert.match(renderer, /127\.0\.0\.1:8080\/inference/);
-  assert.match(processApi, /LOCAL_RENDER_BASE_URL/);
+  assert.match(browserAi, /@huggingface\/transformers/);
+  assert.match(browserAi, /onnx-community\/whisper-small/);
+  assert.match(browserAi, /device: webgpu \? "webgpu" : "wasm"/);
+  assert.match(browserAi, /LanguageModel/);
+  assert.match(browserAi, /detectMomentsInBrowser/);
+  assert.match(captionsApi, /captionTracks/);
+  assert.match(captionsApi, /fmt=json3/);
+  assert.doesNotMatch(processApi + server, /OLLAMA|WHISPER_BASE|LOCAL_RENDER_BASE|trycloudflare/);
   assert.match(processApi, /SELECT COUNT\(\*\) AS count FROM clips WHERE project_id=/);
   assert.match(projectApi, /!firebaseClips\.length/);
   assert.match(projectApi, /syncD1Record\("clips"/);
@@ -108,54 +106,11 @@ test("local YouTube AI processing avoids worker memory limits and failed project
   assert.match(page, /project\.status !== "complete" \|\| !project\.clip_count/);
 });
 
-test("real OpenAI and local AI pipelines replace fake output", async () => {
-  const [processApi, ai] = await Promise.all([
-    source("app/api/projects/[id]/process/route.ts"),
-    source("lib/kliyu-ai.ts"),
-  ]);
-  assert.match(processApi, /api\.openai\.com\/v1\/audio\/transcriptions/);
-  assert.match(processApi, /openai-whisper/);
-  assert.match(ai, /api\.openai\.com\/v1\/responses/);
-  assert.match(ai, /json_schema/);
-  assert.match(processApi, /WHISPER_BASE_URL/);
-  assert.match(processApi, /whisper\.cpp-local/);
-  assert.match(ai, /OLLAMA|Ollama|api\/generate/);
-  for (const criterion of [
-    "Hook Strength",
-    "Clarity",
-    "Emotion",
-    "Standalone Value",
-    "Shareability",
-    "Curiosity",
-  ])
-    assert.ok(ai.includes(criterion));
-  assert.doesNotMatch(processApi + ai, /demoMoments|clipin-demo/);
-});
-
-test("hosted Ollama uses an authenticated local AI gateway", async () => {
-  const [gateway, server, processApi, ai, renderer] = await Promise.all([
-    source("scripts/local-ai-gateway.mjs"),
-    source("lib/server.ts"),
-    source("app/api/projects/[id]/process/route.ts"),
-    source("lib/kliyu-ai.ts"),
-    source("app/api/clips/[id]/render/route.ts"),
-  ]);
-  assert.match(gateway, /Bearer \$\{token\}/);
-  assert.match(gateway, /active >= 2/);
-  assert.match(gateway, /600 \* 1024 \* 1024/);
-  assert.match(server, /LOCAL_AI_TOKEN/);
-  assert.match(processApi, /localAiHeaders/);
-  assert.match(ai, /authToken/);
-  assert.match(renderer, /localAiHeaders/);
-});
-
 test("clip workflow includes filters, real preview, typography controls, Studio, render, and MP4 download", async () => {
   const [
     page,
     clipApi,
     renderApi,
-    localRender,
-    overlay,
     downloadApi,
     mediaApi,
     logoApi,
@@ -163,8 +118,6 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
     source("app/page.tsx"),
     source("app/api/clips/[id]/route.ts"),
     source("app/api/clips/[id]/render/route.ts"),
-    source("scripts/local-render-server.mjs"),
-    source("scripts/render-text-overlay.swift"),
     source("app/api/clips/[id]/download/route.ts"),
     source("app/api/clips/[id]/media/route.ts"),
     source("app/api/clips/[id]/logo/route.ts"),
@@ -186,20 +139,7 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
   for (const ratio of ["9:16", "1:1", "16:9"]) assert.ok(page.includes(ratio));
   assert.match(clipApi, /status='ready',rendered_key=NULL/);
   assert.match(renderApi, /RENDER_SERVICE_URL/);
-  assert.match(renderApi, /LOCAL_RENDER_BASE_URL/);
-  assert.match(localRender, /ffmpeg/);
-  for (const feature of [
-    "captionsEnabled",
-    "hookOverlay",
-    "watermark",
-    "logo",
-    "loudnorm",
-    "render-text-overlay",
-  ])
-    assert.ok(
-      (renderApi + localRender).includes(feature),
-      `local render missing ${feature}`,
-    );
+  assert.doesNotMatch(renderApi, /LOCAL_RENDER_BASE_URL|127\.0\.0\.1/);
   assert.match(renderApi, /rendered_key/);
   assert.match(downloadApi, /content-disposition/i);
   assert.match(page, /real-clip-video/);
@@ -221,26 +161,21 @@ test("clip workflow includes filters, real preview, typography controls, Studio,
   assert.match(page, /titleEffect/);
   for (const field of ["fontFamily", "fontColor", "fontEffect"])
     assert.ok(
-      (page + clipApi + renderApi + localRender).includes(field),
+      (page + clipApi + renderApi).includes(field),
       `font pipeline missing ${field}`,
     );
-  assert.match(overlay, /selectedFont/);
-  assert.match(overlay, /fontHex/);
   assert.match(page, /\/media/);
   assert.match(mediaApi, /content-range/);
   assert.match(mediaApi, /status:206/);
   assert.ok(logoApi.includes("image\\/(png|jpeg|webp)"));
 });
 
-test("advanced Studio tools persist and reach the native render pipeline", async () => {
-  const [page, clipApi, renderApi, renderer, overlay, faceTool, migration] =
+test("advanced Studio tools persist and reach the cloud render adapter", async () => {
+  const [page, clipApi, renderApi, migration] =
     await Promise.all([
       source("app/page.tsx"),
       source("app/api/clips/[id]/route.ts"),
       source("app/api/clips/[id]/render/route.ts"),
-      source("scripts/local-render-server.mjs"),
-      source("scripts/render-text-overlay.swift"),
-      source("scripts/detect-face-center.swift"),
       source("drizzle/0009_worried_king_cobra.sql"),
     ]);
   for (const feature of [
@@ -250,7 +185,6 @@ test("advanced Studio tools persist and reach the native render pipeline", async
     "Preset visual",
     "SUBTITLE EDITOR",
     "Smart cleanup",
-    "antrean lokal",
     "Batalkan",
   ])
     assert.ok(page.includes(feature), `advanced editor missing ${feature}`);
@@ -262,13 +196,9 @@ test("advanced Studio tools persist and reach the native render pipeline", async
     "subtitles",
   ])
     assert.ok(
-      (page + clipApi + renderApi + renderer).includes(field),
+      (page + clipApi + renderApi).includes(field),
       `advanced pipeline missing ${field}`,
     );
-  assert.match(renderer, /karaoke:/);
-  assert.match(overlay, /karaokeIndex/);
-  assert.match(faceTool, /VNDetectFaceRectanglesRequest/);
-  assert.match(renderer, /faceTracking/);
   assert.match(renderApi, /export async function DELETE/);
   assert.match(migration, /title_animation/);
 });
@@ -278,8 +208,7 @@ test("production editor upgrades include real progress, word timing, cleanup, hi
     page,
     processApi,
     renderApi,
-    renderer,
-    faceTool,
+    browserAi,
     projectsApi,
     contentUi,
     contentApi,
@@ -289,8 +218,7 @@ test("production editor upgrades include real progress, word timing, cleanup, hi
     source("app/page.tsx"),
     source("app/api/projects/[id]/process/route.ts"),
     source("app/api/clips/[id]/render/route.ts"),
-    source("scripts/local-render-server.mjs"),
-    source("scripts/detect-face-center.swift"),
+    source("lib/browser-ai.ts"),
     source("app/api/projects/[id]/route.ts"),
     source("app/content-os.tsx"),
     source("app/api/content/route.ts"),
@@ -307,13 +235,8 @@ test("production editor upgrades include real progress, word timing, cleanup, hi
     "Delete project",
   ])
     assert.ok(page.includes(feature), `missing ${feature}`);
-  assert.match(processApi, /timestamp_granularities/);
-  assert.match(processApi, /inferredWords/);
-  assert.match(renderer, /timedWords/);
-  assert.match(renderer, /silencedetect/);
-  assert.match(renderer, /out_time_ms/);
-  assert.match(renderer, /\/progress\//);
-  assert.match(faceTool, /joined\(separator: ";"\)/);
+  assert.match(processApi, /browserAnalysis/);
+  assert.match(browserAi, /return_timestamps: true/);
   assert.match(renderApi, /export async function GET/);
   assert.match(renderApi, /render_progress/);
   assert.match(projectsApi, /duplicate/);
@@ -324,10 +247,9 @@ test("production editor upgrades include real progress, word timing, cleanup, hi
 });
 
 test("advanced creator tools include transcript cuts, speaker colors, B-roll, audio presets, thumbnail, translation, and Brand Kit", async () => {
-  const [page, renderer, renderApi, migration, translation] = await Promise.all(
+  const [page, renderApi, migration, translation] = await Promise.all(
     [
       source("app/page.tsx"),
-      source("scripts/local-render-server.mjs"),
       source("app/api/clips/[id]/render/route.ts"),
       source("drizzle/0011_green_xorn.sql"),
       source("app/api/clips/[id]/translate/route.ts"),
@@ -339,10 +261,7 @@ test("advanced creator tools include transcript cuts, speaker colors, B-roll, au
   assert.match(page, /Smart Thumbnail/);
   assert.match(page, /FITUR CREATOR BARU/);
   assert.match(page, /Studio Lengkap/);
-  assert.match(renderer, /aselect=/);
-  assert.match(renderer, /audioPreset/);
-  assert.match(renderer, /brollFile/);
-  assert.match(renderApi, /clip\.broll_key/);
+  assert.match(renderApi, /JSON\.stringify\(clip\)/);
   assert.match(migration, /transcript_cut/);
   assert.match(translation, /translateSubtitleText/);
 });
@@ -393,7 +312,7 @@ test("account settings and authenticated sign-out remain wired", async () => {
     assert.ok(page.toLowerCase().includes(feature.toLowerCase()));
   assert.match(account, /user_settings/);
   assert.match(account, /subscriptions/);
-  assert.match(capabilities, /OPENAI_API_KEY/);
+  assert.match(capabilities, /aiProvider: "browser"/);
   assert.match(capabilities, /RENDER_SERVICE_URL/);
   assert.match(notifications, /UPDATE notifications SET read=1/);
 });

@@ -6,18 +6,15 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "bash scripts/start-local-ai.sh && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "local-ai:setup": "bash scripts/setup-local-ai.sh",
-    "local-ai:start": "bash scripts/start-local-ai.sh",
-    "local-ai:check": "bash scripts/check-local-ai.sh",
-    "local-ai:stop": "bash scripts/stop-local-ai.sh",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "drizzle-orm": "0.45.2",
     "lucide-react": "^0.468.0",
     "next": "16.2.6",

@@ -1,12 +1,10 @@
-import { detectMoments, type TranscriptSegment } from "@/lib/kliyu-ai";
+import type { KliyuMoment, TranscriptSegment } from "@/lib/kliyu-ai";
 import {
-  aiProvider,
   bindings,
   currentUser,
   guardMutation,
   id,
   jsonError,
-  localAiHeaders,
 } from "@/lib/server";
 import {
   firebaseDelete,
@@ -23,120 +21,21 @@ type ProjectSource = {
   language?: string;
   status?: string;
 };
-type TranscriptionWord = { start?: number; end?: number; word?: string };
-type TranscriptionResponse = {
-  text?: string;
-  segments?: Array<{
-    start?: number;
-    end?: number;
-    text?: string;
-    words?: TranscriptionWord[];
-  }>;
-  words?: TranscriptionWord[];
+type BrowserAnalysis = {
+  transcript?: string;
+  segments?: TranscriptSegment[];
+  moments?: KliyuMoment[];
+  provider?: string;
 };
-
-function inferredWords(text: string, start: number, end: number) {
-  const words = text.match(/\S+/g) || [];
-  const weights = words.map((word) =>
-    Math.max(1, word.replace(/[^\p{L}\p{N}]/gu, "").length),
-  );
-  const total = weights.reduce((sum, value) => sum + value, 0) || 1;
-  let cursor = start;
-  return words.map((word, index) => {
-    const duration = (end - start) * (weights[index] / total);
-    const item = { start: cursor, end: Math.min(end, cursor + duration), word };
-    cursor = item.end;
-    return item;
-  });
-}
-
-async function transcribe(
-  file: File | null,
-  language?: string,
-  sourceUrl?: string,
-): Promise<TranscriptionResponse> {
-  const provider = aiProvider();
-  if (provider === "ollama" && sourceUrl && bindings.LOCAL_RENDER_BASE_URL) {
-    const response = await fetch(
-      `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/transcribe-url`,
-      {
-        method: "POST",
-        headers: localAiHeaders({ "content-type": "application/json" }),
-        body: JSON.stringify({ url: sourceUrl, language }),
-      },
-    );
-    if (!response.ok) {
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      throw new Error(
-        result.error || `Transkripsi link gagal (${response.status})`,
-      );
-    }
-    return (await response.json()) as TranscriptionResponse;
-  }
-  if (!file) throw new Error("File video belum tersedia untuk transkripsi");
-  const form = new FormData();
-  form.append("file", file);
-  form.append("response_format", "verbose_json");
-  form.append("timestamp_granularities[]", "segment");
-  form.append("timestamp_granularities[]", "word");
-  if (language === "id" || language === "en") form.append("language", language);
-
-  if (provider === "ollama") {
-    const baseUrl = (
-      bindings.WHISPER_BASE_URL || "http://127.0.0.1:8080"
-    ).replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/inference`, {
-      method: "POST",
-      headers: localAiHeaders(),
-      body: form,
-    });
-    if (!response.ok)
-      throw new Error(
-        `Whisper lokal gagal (${response.status}). Pastikan whisper-server aktif.`,
-      );
-    return (await response.json()) as TranscriptionResponse;
-  }
-
-  if (!bindings.OPENAI_API_KEY)
-    throw new Error("OPENAI_API_KEY belum dikonfigurasi");
-  form.append("model", "whisper-1");
-  const response = await fetch(
-    "https://api.openai.com/v1/audio/transcriptions",
-    {
-      method: "POST",
-      headers: { authorization: `Bearer ${bindings.OPENAI_API_KEY}` },
-      body: form,
-    },
-  );
-  if (!response.ok)
-    throw new Error(`Transkripsi OpenAI gagal (${response.status})`);
-  return (await response.json()) as TranscriptionResponse;
-}
 
 async function ensureStoredSource(projectId: string, project: ProjectSource) {
   if (project.storage_key) return project.storage_key;
   if (!project.source_url) return null;
-  let source = await fetch(project.source_url, {
+  const source = await fetch(project.source_url, {
     redirect: "follow",
     headers: { "user-agent": "KLIYU/1.0 video importer" },
   });
-  let contentType = source.headers.get("content-type") || "";
-  if (
-    (!source.ok || !source.body || !contentType.startsWith("video/")) &&
-    bindings.LOCAL_RENDER_BASE_URL
-  ) {
-    source = await fetch(
-      `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/import`,
-      {
-        method: "POST",
-        headers: localAiHeaders({ "content-type": "application/json" }),
-        body: JSON.stringify({ url: project.source_url }),
-      },
-    );
-    contentType = source.headers.get("content-type") || "";
-  }
+  const contentType = source.headers.get("content-type") || "";
   if (!source.ok || !source.body)
     throw new Error(`Video dari link tidak dapat diambil (${source.status})`);
   if (!contentType.startsWith("video/"))
@@ -166,6 +65,10 @@ export async function POST(
 ) {
   const guarded = guardMutation(request, "process");
   if (guarded) return guarded;
+  const body = (await request.json().catch(() => ({}))) as {
+    browserAnalysis?: BrowserAnalysis;
+  };
+  const analysis = body.browserAnalysis;
   const user = await currentUser(),
     { id: projectId } = await params;
   const project = await bindings.DB.prepare(
@@ -181,11 +84,10 @@ export async function POST(
     .first<{ count: number }>();
   if (project.status === "complete" && Number(existingClips?.count || 0) > 0)
     return jsonError("Project ini sudah selesai diproses", 409);
-  const provider = aiProvider();
-  if (provider === "openai" && !bindings.OPENAI_API_KEY)
+  if (!analysis)
     return jsonError(
-      "KLIYU AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau aktifkan AI_PROVIDER=ollama.",
-      503,
+      "Analisis Browser AI belum dikirim. Buka project dari browser dan pilih Proses ulang.",
+      400,
     );
   const quota = await bindings.DB.prepare(
     "SELECT minutes_used,minutes_limit FROM subscriptions WHERE user_id=?",
@@ -209,18 +111,11 @@ export async function POST(
     updated_at: Date.now(),
   });
   try {
-    const storageKey = await ensureStoredSource(projectId, project);
-    if (!storageKey) throw new Error("Video sumber belum tersedia");
-    const object = await bindings.MEDIA.get(storageKey);
-    if (!object) throw new Error("Video sumber tidak ditemukan di penyimpanan");
-    const maxSourceSize =
-      provider === "ollama" ? 512 * 1024 * 1024 : 25 * 1024 * 1024;
-    if (object.size > maxSourceSize)
-      throw new Error(
-        provider === "ollama"
-          ? "Video melebihi batas pemrosesan lokal 512 MB. Kompres video terlebih dahulu."
-          : "OpenAI Whisper mendukung file hingga 25 MB. Kompres video atau gunakan AI lokal.",
-      );
+    if (!project.storage_key && project.source_url) {
+      const parsed = new URL(project.source_url);
+      const directVideo = /\.(?:mp4|webm|mov)(?:$|\?)/i.test(parsed.pathname);
+      if (directVideo) await ensureStoredSource(projectId, project);
+    }
     await bindings.DB.prepare(
       "UPDATE projects SET progress=40,updated_at=? WHERE id=?",
     )
@@ -230,56 +125,44 @@ export async function POST(
       progress: 40,
       updated_at: Date.now(),
     });
-    const useDirectUrl =
-      provider === "ollama" &&
-      Boolean(project.source_url) &&
-      Boolean(bindings.LOCAL_RENDER_BASE_URL);
-    const file = useDirectUrl
-      ? null
-      : new File(
-          [await object.arrayBuffer()],
-          project.title.replace(/[^a-z0-9]+/gi, "-") + ".mp4",
-          {
-            type:
-              object.httpMetadata?.contentType ||
-              project.content_type ||
-              "video/mp4",
-          },
-        );
-    const transcriptData = await transcribe(
-      file,
-      project.language,
-      useDirectUrl ? project.source_url : undefined,
-    );
-    const transcript = transcriptData.text?.trim();
-    if (!transcript) throw new Error("Transkripsi kosong");
-    const globalWords = transcriptData.words || [];
-    const segments: TranscriptSegment[] = (transcriptData.segments || [])
-      .map((segment) => {
-        const start = Number(segment.start || 0),
-          end = Number(segment.end || 0),
-          text = String(segment.text || "").trim();
-        const sourceWords = segment.words?.length
-          ? segment.words
-          : globalWords.filter(
-              (word) =>
-                Number(word.end || 0) > start && Number(word.start || 0) < end,
-            );
-        const words = sourceWords
-          .map((word) => ({
-            start: Number(word.start || 0),
-            end: Number(word.end || 0),
-            word: String(word.word || "").trim(),
-          }))
-          .filter((word) => word.word && word.end > word.start);
-        return {
-          start,
-          end,
-          text,
-          words: words.length ? words : inferredWords(text, start, end),
-        };
-      })
-      .filter((segment) => segment.text && segment.end > segment.start);
+    const transcript = String(analysis.transcript || "").trim().slice(0, 500000);
+    const segments = (analysis.segments || [])
+      .slice(0, 20000)
+      .map((segment) => ({
+        start: Number(segment.start),
+        end: Number(segment.end),
+        text: String(segment.text || "").trim().slice(0, 2000),
+        words: Array.isArray(segment.words) ? segment.words.slice(0, 500) : undefined,
+      }))
+      .filter(
+        (segment) =>
+          Number.isFinite(segment.start) &&
+          Number.isFinite(segment.end) &&
+          segment.end > segment.start &&
+          segment.text,
+      );
+    const moments = (analysis.moments || [])
+      .slice(0, 10)
+      .map((moment) => ({
+        start: Number(moment.start),
+        end: Number(moment.end),
+        score: Math.round(Math.min(100, Math.max(0, Number(moment.score)))),
+        title: String(moment.title || "").trim().slice(0, 90),
+        hook: String(moment.hook || "").trim().slice(0, 160),
+        reason: String(moment.reason || "").trim().slice(0, 240),
+        category: String(moment.category || "insight").trim().slice(0, 40),
+      }))
+      .filter(
+        (moment) =>
+          Number.isFinite(moment.start) &&
+          Number.isFinite(moment.end) &&
+          moment.end > moment.start &&
+          moment.end - moment.start <= 90 &&
+          moment.title &&
+          moment.hook,
+      );
+    if (!transcript || !segments.length || !moments.length)
+      throw new Error("Hasil Browser AI tidak lengkap");
     const duration = segments.reduce(
       (max, segment) => Math.max(max, segment.end),
       0,
@@ -293,31 +176,6 @@ export async function POST(
     await firebasePatch("projects", projectId, {
       progress: 68,
       updated_at: Date.now(),
-    });
-    const performance = await bindings.DB.prepare(
-      "SELECT clips.category,COUNT(*) posts,CAST(AVG(publications.views) AS INTEGER) avg_views,CAST(AVG(publications.likes+publications.shares*2) AS INTEGER) avg_engagement FROM publications JOIN clips ON clips.id=publications.clip_id WHERE publications.user_id=? AND publications.status='published' GROUP BY clips.category ORDER BY avg_views DESC LIMIT 5",
-    )
-      .bind(user.id)
-      .all<Record<string, unknown>>();
-    const performanceHint = performance.results.length
-      ? performance.results
-          .map(
-            (row) =>
-              `${String(row.category || "umum")}: ${Number(row.posts || 0)} post, rata-rata ${Number(row.avg_views || 0)} views, engagement ${Number(row.avg_engagement || 0)}`,
-          )
-          .join("; ")
-      : undefined;
-    const moments = await detectMoments({
-      provider,
-      apiKey: bindings.OPENAI_API_KEY,
-      model:
-        provider === "ollama" ? bindings.OLLAMA_MODEL : bindings.OPENAI_MODEL,
-      baseUrl: bindings.OLLAMA_BASE_URL,
-      authToken: bindings.LOCAL_AI_TOKEN,
-      transcript,
-      segments,
-      performanceHint,
-      safetyIdentifier: user.id,
     });
     const now = Date.now();
     const userDefaults = await bindings.DB.prepare(
@@ -340,7 +198,7 @@ export async function POST(
         projectId,
         transcript,
         JSON.stringify(segments),
-        provider === "ollama" ? "whisper.cpp-local" : "openai-whisper",
+        String(analysis.provider || "browser-ai").slice(0, 80),
         now,
       ),
     ];
@@ -434,7 +292,7 @@ export async function POST(
         project_id: projectId,
         text: transcript,
         segments: JSON.stringify(segments),
-        provider: provider === "ollama" ? "whisper.cpp-local" : "openai-whisper",
+        provider: String(analysis.provider || "browser-ai").slice(0, 80),
         created_at: now,
       }),
       firebasePatch("projects", projectId, {
@@ -447,7 +305,7 @@ export async function POST(
       }),
       ...firebaseClips.map((clip) => firebaseSet("clips", clip.id, clip.data)),
     ]);
-    return Response.json({ ok: true, provider, clips: moments.length });
+    return Response.json({ ok: true, provider: "browser", clips: moments.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Processing gagal";
     await bindings.DB.prepare(

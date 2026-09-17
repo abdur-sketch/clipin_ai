@@ -40,10 +40,7 @@ export async function POST(
     const texts = await translateSubtitleText({
       provider,
       apiKey: bindings.OPENAI_API_KEY,
-      model:
-        provider === "ollama" ? bindings.OLLAMA_MODEL : bindings.OPENAI_MODEL,
-      baseUrl: bindings.OLLAMA_BASE_URL,
-      authToken: bindings.LOCAL_AI_TOKEN,
+      model: bindings.OPENAI_MODEL,
       safetyIdentifier: user.id,
       language,
       rows: subtitles.map((row, index) => ({

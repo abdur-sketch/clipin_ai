@@ -68,11 +68,9 @@ const socialCaptionSchema = {
 } as const;
 
 type AiOptions = {
-  provider?: "openai" | "ollama";
+  provider?: "openai";
   apiKey?: string;
   model?: string;
-  baseUrl?: string;
-  authToken?: string;
   safetyIdentifier?: string;
 };
 
@@ -91,37 +89,6 @@ async function structuredJson<T>(
     schemaName: string;
   },
 ): Promise<T> {
-  if (options.provider === "ollama") {
-    const baseUrl = (options.baseUrl || "http://127.0.0.1:11434").replace(
-      /\/$/,
-      "",
-    );
-    const response = await fetch(`${baseUrl}/api/generate`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(options.authToken
-          ? { authorization: `Bearer ${options.authToken}` }
-          : {}),
-      },
-      body: JSON.stringify({
-        model: options.model || "qwen2.5:1.5b",
-        system: options.instructions,
-        prompt: `${options.input}\n\nKembalikan hanya JSON valid sesuai schema berikut:\n${JSON.stringify(options.schema)}`,
-        format: options.schema,
-        stream: false,
-        options: { temperature: 0 },
-      }),
-    });
-    if (!response.ok)
-      throw new Error(
-        `Ollama gagal (${response.status}). Pastikan Ollama aktif dan model sudah diunduh.`,
-      );
-    const data = (await response.json()) as { response?: string };
-    if (!data.response) throw new Error("Ollama tidak mengembalikan hasil");
-    return JSON.parse(cleanJson(data.response)) as T;
-  }
-
   if (!options.apiKey) throw new Error("OPENAI_API_KEY belum dikonfigurasi");
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -159,7 +126,7 @@ async function structuredJson<T>(
   return JSON.parse(cleanJson(outputText)) as T;
 }
 
-function stabilizeLocalMoments(
+function stabilizeMoments(
   clips: KliyuMoment[],
   segments: TranscriptSegment[],
   duration: number,
@@ -301,11 +268,7 @@ export async function detectMoments(
         clip.title &&
         clip.hook,
     );
-  const clips = (
-    options.provider === "ollama"
-      ? stabilizeLocalMoments(rawClips, options.segments, duration)
-      : rawClips
-  )
+  const clips = stabilizeMoments(rawClips, options.segments, duration)
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
   if (!clips.length)
@@ -390,7 +353,7 @@ export async function generateSocialCaption(
     !result.cta?.trim() ||
     hashtags.length < 3
   )
-    throw new Error("AI lokal mengembalikan caption yang tidak lengkap");
+    throw new Error("AI cloud mengembalikan caption yang tidak lengkap");
   return {
     hook: result.hook.trim(),
     caption: result.caption.trim(),
