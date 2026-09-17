@@ -40,7 +40,11 @@ async function browserTranscriber(
 ) {
   if (!transcriberPromise) {
     transcriberPromise = (async () => {
-      const { pipeline, env } = await import("@huggingface/transformers");
+      const transformersUrl =
+        "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+      const { pipeline, env } = await import(
+        /* @vite-ignore */ transformersUrl
+      );
       env.allowLocalModels = false;
       const webgpu = "gpu" in navigator;
       const instance = await pipeline(
