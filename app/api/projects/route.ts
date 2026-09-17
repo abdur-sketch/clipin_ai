@@ -42,6 +42,8 @@ export async function POST(request: Request) {
     filename?: string;
     contentType?: string;
     sourceUrl?: string;
+    targetDuration?: number;
+    contentStyle?: string;
   };
   if (!body.title?.trim()) return jsonError("Nama project wajib diisi");
   let sourceUrl: string | null = null,
@@ -67,6 +69,14 @@ export async function POST(request: Request) {
   }
   const projectId = id("prj"),
     now = Date.now();
+  const targetDuration = [15, 30, 60].includes(Number(body.targetDuration))
+    ? Number(body.targetDuration)
+    : 30;
+  const contentStyle = ["viral", "education", "sales", "story"].includes(
+    String(body.contentStyle),
+  )
+    ? String(body.contentStyle)
+    : "viral";
   const defaults = await bindings.DB.prepare(
     "SELECT language FROM user_settings WHERE user_id=?",
   )
@@ -76,7 +86,7 @@ export async function POST(request: Request) {
     ? String(defaults?.language)
     : "id";
   await bindings.DB.prepare(
-    "INSERT INTO projects (id,user_id,title,filename,content_type,source_url,source_type,language,status,progress,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'draft',0,?,?)",
+    "INSERT INTO projects (id,user_id,title,filename,content_type,source_url,source_type,language,target_duration,content_style,status,progress,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'draft',0,?,?)",
   )
     .bind(
       projectId,
@@ -87,6 +97,8 @@ export async function POST(request: Request) {
       sourceUrl,
       sourceType,
       language,
+      targetDuration,
+      contentStyle,
       now,
       now,
     )
@@ -101,6 +113,8 @@ export async function POST(request: Request) {
     source_type: sourceType,
     duration: 0,
     language,
+    target_duration: targetDuration,
+    content_style: contentStyle,
     status: "draft",
     progress: 0,
     error: null,
@@ -115,6 +129,8 @@ export async function POST(request: Request) {
         title: body.title.trim(),
         sourceType,
         sourceUrl,
+        targetDuration,
+        contentStyle,
         status: "draft",
         progress: 0,
         createdAt: now,

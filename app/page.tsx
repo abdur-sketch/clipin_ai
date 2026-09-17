@@ -8,6 +8,7 @@ import {
   generateSocialCaptionInBrowser,
   translateRowsInBrowser,
   prepareBrowserAi,
+  type AnalysisPreferences,
   type BrowserAnalysis,
 } from "@/lib/browser-ai";
 import {
@@ -204,6 +205,8 @@ type ProjectSummary = {
   duration?: number;
   updated_at?: number;
   error?: string | null;
+  target_duration?: number;
+  content_style?: string;
 };
 type Notice = {
   id: string;
@@ -415,14 +418,31 @@ export default function Home() {
   async function analyzeProjectInBrowser(
     projectId: string,
     originalFile?: File,
+    requestedPreferences?: AnalysisPreferences,
   ): Promise<BrowserAnalysis> {
-    if (originalFile)
-      return analyzeVideoInBrowser(originalFile, (value) => setProgress(value));
     const detailResponse = await fetch(`/api/projects/${projectId}`);
     if (!detailResponse.ok) throw new Error("Project tidak dapat dibaca");
     const detail = (await detailResponse.json()) as {
-      project: { source_type?: string; filename?: string; content_type?: string };
+      project: {
+        source_type?: string;
+        filename?: string;
+        content_type?: string;
+        target_duration?: number;
+        content_style?: AnalysisPreferences["contentStyle"];
+      };
     };
+    const preferences: AnalysisPreferences = requestedPreferences || {
+      targetDuration: ([15, 30, 60].includes(Number(detail.project.target_duration))
+        ? Number(detail.project.target_duration)
+        : 30) as 15 | 30 | 60,
+      contentStyle: detail.project.content_style || "viral",
+    };
+    if (originalFile)
+      return analyzeVideoInBrowser(
+        originalFile,
+        (value) => setProgress(value),
+        preferences,
+      );
     if (detail.project.source_type === "youtube") {
       setProgress(34);
       const captionResponse = await fetch(`/api/projects/${projectId}/captions`);
@@ -438,6 +458,7 @@ export default function Home() {
         captions.transcript,
         captions.segments,
         (value) => setProgress(value),
+        preferences,
       );
       return {
         transcript: captions.transcript,
@@ -456,7 +477,11 @@ export default function Home() {
     const file = new File([blob], detail.project.filename || "video.mp4", {
       type: detail.project.content_type || blob.type || "video/mp4",
     });
-    return analyzeVideoInBrowser(file, (value) => setProgress(value));
+    return analyzeVideoInBrowser(
+      file,
+      (value) => setProgress(value),
+      preferences,
+    );
   }
 
   const filtered = useMemo(
@@ -470,7 +495,11 @@ export default function Home() {
     [filter, clipItems],
   );
 
-  async function startUpload(source?: File | string, projectName?: string) {
+  async function startUpload(
+    source?: File | string,
+    projectName?: string,
+    preferences: AnalysisPreferences = {},
+  ) {
     setUploadError("");
     setProgress(8);
     setProcessing(true);
@@ -492,6 +521,8 @@ export default function Home() {
           filename: file?.name,
           contentType: file?.type,
           sourceUrl,
+          targetDuration: preferences.targetDuration || 30,
+          contentStyle: preferences.contentStyle || "viral",
         }),
       });
       if (!created.ok)
@@ -510,7 +541,11 @@ export default function Home() {
           throw new Error((await uploaded.json()).error || "Upload gagal");
         setProgress(52);
       }
-      const browserAnalysis = await analyzeProjectInBrowser(project.id, file);
+      const browserAnalysis = await analyzeProjectInBrowser(
+        project.id,
+        file,
+        preferences,
+      );
       const processed = await fetch(`/api/projects/${project.id}/process`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2633,13 +2668,21 @@ function UploadModal({
   progress: number;
   error: string;
   onClose: () => void;
-  onStart: (source?: File | string, projectName?: string) => void;
+  onStart: (
+    source?: File | string,
+    projectName?: string,
+    preferences?: AnalysisPreferences,
+  ) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const [sourceMode, setSourceMode] = useState<"file" | "link">("file");
   const [videoLink, setVideoLink] = useState("");
   const [linkError, setLinkError] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [targetDuration, setTargetDuration] = useState<15 | 30 | 60>(30);
+  const [contentStyle, setContentStyle] = useState<
+    "viral" | "education" | "sales" | "story"
+  >("viral");
   const steps = [
     sourceMode === "link" ? "Membaca caption YouTube" : "Mengunggah video",
     "Menyiapkan model di browser",
@@ -2661,7 +2704,7 @@ function UploadModal({
         return;
       }
       setLinkError("");
-      onStart(value, projectName);
+      onStart(value, projectName, { targetDuration, contentStyle });
     } catch {
       setLinkError(
         "Masukkan link video yang valid, diawali http:// atau https://",
@@ -2709,6 +2752,35 @@ function UploadModal({
                 placeholder="Contoh: Kajian — Pentingnya Shalat"
               />
             </label>
+            <div className="new-project-options">
+              <label>
+                Target durasi klip
+                <select
+                  value={targetDuration}
+                  onChange={(event) =>
+                    setTargetDuration(Number(event.target.value) as 15 | 30 | 60)
+                  }
+                >
+                  <option value={15}>15 detik</option>
+                  <option value={30}>30 detik</option>
+                  <option value={60}>60 detik</option>
+                </select>
+              </label>
+              <label>
+                Tujuan konten
+                <select
+                  value={contentStyle}
+                  onChange={(event) =>
+                    setContentStyle(event.target.value as typeof contentStyle)
+                  }
+                >
+                  <option value="viral">Viral / engagement</option>
+                  <option value="education">Edukasi</option>
+                  <option value="sales">Penjualan</option>
+                  <option value="story">Storytelling</option>
+                </select>
+              </label>
+            </div>
             <div
               className="source-tabs"
               role="tablist"
@@ -2743,7 +2815,11 @@ function UploadModal({
                   onDrop={(event) => {
                     event.preventDefault();
                     const file = event.dataTransfer.files[0];
-                    if (file) onStart(file, projectName);
+                    if (file)
+                      onStart(file, projectName, {
+                        targetDuration,
+                        contentStyle,
+                      });
                   }}
                 >
                   <span>
@@ -2759,7 +2835,11 @@ function UploadModal({
                   hidden
                   onChange={(event) => {
                     const file = event.target.files?.[0];
-                    if (file) onStart(file, projectName);
+                    if (file)
+                      onStart(file, projectName, {
+                        targetDuration,
+                        contentStyle,
+                      });
                   }}
                 />
               </>
@@ -3364,6 +3444,69 @@ function ClipEditor({
       setPlaying(false);
     }
   }
+  function cleanTranscriptFillers() {
+    const filler = /\b(?:eee+|eh+|em+|anu|hmm+|apa namanya|maksudnya)\b[,.!? ]*/gi;
+    setSubtitleRows((rows) =>
+      rows.map((row) => {
+        const text = row.text.replace(filler, " ").replace(/\s+/g, " ").trim();
+        return { ...row, text: text || row.text, removed: text ? row.removed : true };
+      }),
+    );
+    onNotice("Kata filler dibersihkan dari transkrip");
+  }
+  function mergeShortSubtitles() {
+    setSubtitleRows((rows) => {
+      const merged: typeof rows = [];
+      for (const row of rows) {
+        const previous = merged.at(-1);
+        if (
+          previous &&
+          !previous.removed &&
+          !row.removed &&
+          row.start - previous.end < 0.35 &&
+          (previous.text.length < 28 || previous.end - previous.start < 1.25)
+        ) {
+          previous.end = row.end;
+          previous.text = `${previous.text} ${row.text}`.trim();
+          previous.words = [...(previous.words || []), ...(row.words || [])];
+        } else merged.push({ ...row, words: row.words ? [...row.words] : undefined });
+      }
+      return merged;
+    });
+    onNotice("Subtitle pendek berhasil digabung");
+  }
+  function resetTranscriptCuts() {
+    setSubtitleRows((rows) => rows.map((row) => ({ ...row, removed: false })));
+    onNotice("Semua potongan transkrip dipulihkan");
+  }
+  function downloadSubtitles(format: "srt" | "vtt") {
+    const rows = subtitleRows.filter(
+      (row) => !row.removed && row.end >= startTime && row.start <= endTime,
+    );
+    const stamp = (seconds: number, separator: string) => {
+      const value = Math.max(0, seconds - startTime);
+      const hours = Math.floor(value / 3600);
+      const minutes = Math.floor((value % 3600) / 60);
+      const whole = Math.floor(value % 60);
+      const milliseconds = Math.round((value % 1) * 1000);
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(whole).padStart(2, "0")}${separator}${String(milliseconds).padStart(3, "0")}`;
+    };
+    const body = rows
+      .map((row, index) => {
+        const timing = `${stamp(row.start, format === "srt" ? "," : ".")} --> ${stamp(row.end, format === "srt" ? "," : ".")}`;
+        return format === "srt" ? `${index + 1}\n${timing}\n${row.text}` : `${timing}\n${row.text}`;
+      })
+      .join("\n\n");
+    const blob = new Blob([format === "vtt" ? `WEBVTT\n\n${body}` : body], {
+      type: format === "vtt" ? "text/vtt" : "application/x-subrip",
+    });
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "kliyu-subtitle"}.${format}`;
+    anchor.click();
+    URL.revokeObjectURL(anchor.href);
+    onNotice(`Subtitle ${format.toUpperCase()} berhasil diunduh`);
+  }
   return (
     <div className="modal-backdrop editor-backdrop">
       <section className="editor-modal" role="dialog" aria-modal="true">
@@ -3955,6 +4098,13 @@ function ClipEditor({
                 >
                   <Plus /> Tambah
                 </button>
+              </div>
+              <div className="subtitle-tools">
+                <button onClick={cleanTranscriptFillers}>Bersihkan filler</button>
+                <button onClick={mergeShortSubtitles}>Gabungkan baris pendek</button>
+                <button onClick={resetTranscriptCuts}>Reset potongan</button>
+                <button onClick={() => downloadSubtitles("srt")}>Download SRT</button>
+                <button onClick={() => downloadSubtitles("vtt")}>Download VTT</button>
               </div>
               {subtitleRows
                 .filter((row) => row.end >= startTime && row.start <= endTime)

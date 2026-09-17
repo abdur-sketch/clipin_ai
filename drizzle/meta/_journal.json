@@ -85,6 +85,13 @@
       "when": 1789487940574,
       "tag": "0011_green_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1789660240303,
+      "tag": "0012_flippant_night_nurse",
+      "breakpoints": true
     }
   ]
 }

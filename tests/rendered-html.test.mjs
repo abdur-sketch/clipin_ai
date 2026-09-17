@@ -70,12 +70,16 @@ test("new project accepts original files and supported YouTube links", async () 
   ]);
   assert.match(
     page,
-    /onStart:\s*\(source\?: File \| string,\s*projectName\?: string\)/,
+    /onStart:\s*\([\s\S]*source\?: File \| string,[\s\S]*projectName\?: string,[\s\S]*preferences\?: AnalysisPreferences/,
   );
   assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
   assert.match(page, /Link video YouTube/);
   assert.match(page, /Browser AI/);
+  assert.match(page, /Target durasi klip/);
+  assert.match(page, /Tujuan konten/);
+  assert.match(projectsApi, /target_duration/);
+  assert.match(projectsApi, /content_style/);
   assert.doesNotMatch(page, /Gunakan video contoh/);
   assert.match(projectsApi, /Link video tidak valid/);
   assert.match(processApi, /browserAnalysis/);

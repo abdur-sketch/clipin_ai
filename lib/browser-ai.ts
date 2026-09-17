@@ -7,6 +7,11 @@ export type BrowserAnalysis = {
   provider: "browser-whisper-webgpu" | "browser-whisper-wasm" | "source-captions";
 };
 
+export type AnalysisPreferences = {
+  targetDuration?: 15 | 30 | 60;
+  contentStyle?: "viral" | "education" | "sales" | "story";
+};
+
 type WhisperChunk = { text?: string; timestamp?: [number, number | null] };
 type WhisperResult = { text?: string; chunks?: WhisperChunk[] };
 type BrowserLanguageSession = {
@@ -162,21 +167,32 @@ export async function transcribeVideoInBrowser(
   }
 }
 
-function scoreWindows(segments: TranscriptSegment[]) {
+function scoreWindows(
+  segments: TranscriptSegment[],
+  preferences: AnalysisPreferences = {},
+) {
+  const targetDuration = preferences.targetDuration || 30;
+  const contentStyle = preferences.contentStyle || "viral";
   const hookWords =
     /\b(?:kenapa|bagaimana|ternyata|rahasia|jangan|harus|penting|masalah|cara|tips|fakta|bayangkan|pertama|terakhir)\b/i;
   const emotionWords =
     /\b(?:gagal|berhasil|salah|benar|takut|senang|sulit|mudah|kaget|percaya|untung|rugi)\b/i;
+  const styleWords: Record<string, RegExp> = {
+    viral: /\b(?:rahasia|ternyata|jangan|kaget|gagal|berhasil)\b/i,
+    education: /\b(?:cara|langkah|contoh|alasan|artinya|pelajaran|tips)\b/i,
+    sales: /\b(?:pelanggan|produk|hasil|harga|manfaat|solusi|beli)\b/i,
+    story: /\b(?:awalnya|kemudian|akhirnya|pernah|ketika|suatu|cerita)\b/i,
+  };
   return segments
     .map((anchor, startIndex) => {
       let endIndex = startIndex;
       while (
         endIndex + 1 < segments.length &&
-        segments[endIndex].end - anchor.start < 42
+        segments[endIndex].end - anchor.start < targetDuration + 10
       ) {
         endIndex++;
         if (
-          segments[endIndex].end - anchor.start >= 18 &&
+          segments[endIndex].end - anchor.start >= Math.max(10, targetDuration - 8) &&
           /[.!?][”"']?$/.test(segments[endIndex].text.trim())
         )
           break;
@@ -196,9 +212,10 @@ function scoreWindows(segments: TranscriptSegment[]) {
       let score = 55 + Math.min(14, words.length / 5) + unique * 11;
       if (hookWords.test(text)) score += 9;
       if (emotionWords.test(text)) score += 7;
+      if (styleWords[contentStyle].test(text)) score += 8;
       if (/\d/.test(text)) score += 3;
       if (/[?]/.test(text)) score += 4;
-      if (duration >= 18 && duration <= 45) score += 7;
+      if (Math.abs(duration - targetDuration) <= 8) score += 9;
       if (words.length < 24) score -= 18;
       return {
         start: anchor.start,
@@ -234,9 +251,10 @@ export async function detectMomentsInBrowser(
   transcript: string,
   segments: TranscriptSegment[],
   onProgress?: (progress: number, message: string) => void,
+  preferences: AnalysisPreferences = {},
 ) {
   onProgress?.(78, "Browser AI memilih momen terbaik");
-  const candidates = scoreWindows(segments);
+  const candidates = scoreWindows(segments, preferences);
   if (!candidates.length)
     throw new Error("Video belum memiliki cukup percakapan untuk dibuat klip");
   const languageModel = languageModelApi();
@@ -277,8 +295,8 @@ export async function detectMomentsInBrowser(
       score: candidate.score,
       title: String(enhanced?.title || sentence).slice(0, 90),
       hook: String(enhanced?.hook || sentence).slice(0, 160),
-      reason: "Dipilih langsung di browser berdasarkan hook, konteks utuh, emosi, dan potensi dibagikan.",
-      category: String(enhanced?.category || "insight").slice(0, 40),
+      reason: `Dipilih Browser AI karena memiliki hook kuat, konteks utuh, durasi mendekati ${preferences.targetDuration || 30} detik, dan cocok untuk gaya ${preferences.contentStyle || "viral"}.`,
+      category: String(enhanced?.category || preferences.contentStyle || "insight").slice(0, 40),
     } satisfies KliyuMoment;
   });
 }
@@ -375,12 +393,14 @@ export function browserAiReadiness() {
 export async function analyzeVideoInBrowser(
   file: File,
   onProgress?: (progress: number, message: string) => void,
+  preferences: AnalysisPreferences = {},
 ): Promise<BrowserAnalysis> {
   const transcription = await transcribeVideoInBrowser(file, onProgress);
   const moments = await detectMomentsInBrowser(
     transcription.transcript,
     transcription.segments,
     onProgress,
+    preferences,
   );
   return { ...transcription, moments };
 }

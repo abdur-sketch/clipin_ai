@@ -18,6 +18,8 @@ export const projects = sqliteTable("projects", {
   sourceType: text("source_type").notNull().default("upload"),
   duration: real("duration").notNull().default(0),
   language: text("language").notNull().default("id"),
+  targetDuration: integer("target_duration").notNull().default(30),
+  contentStyle: text("content_style").notNull().default("viral"),
   status: text("status").notNull().default("draft"),
   progress: integer("progress").notNull().default(0),
   error: text("error"),

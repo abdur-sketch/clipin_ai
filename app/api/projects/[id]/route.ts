@@ -120,7 +120,7 @@ export async function PATCH(
       else storageKey = null;
     }
     await bindings.DB.prepare(
-      "INSERT INTO projects (id,user_id,title,filename,content_type,storage_key,source_url,source_type,duration,language,status,progress,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO projects (id,user_id,title,filename,content_type,storage_key,source_url,source_type,duration,language,target_duration,content_style,status,progress,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
       .bind(
         newId,
@@ -133,6 +133,8 @@ export async function PATCH(
         project.source_type,
         project.duration,
         project.language,
+        project.target_duration || 30,
+        project.content_style || "viral",
         project.status,
         project.progress,
         null,
