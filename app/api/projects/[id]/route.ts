@@ -18,17 +18,47 @@ export async function GET(
     id,
   );
   if (firebaseProject && firebaseProject.user_id === user.id) {
-    const firebaseClips =
+    let firebaseClips =
       (await firebaseList<Record<string, unknown>>("clips", {
         field: "project_id",
         equals: id,
         limit: 100,
       })) || [];
-    firebaseClips.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-    const firebaseTranscript = await firebaseGet<Record<string, unknown>>(
+    let firebaseTranscript = await firebaseGet<Record<string, unknown>>(
       "transcripts",
       id,
     );
+    if (!firebaseClips.length) {
+      const d1Clips = await bindings.DB.prepare(
+        "SELECT * FROM clips WHERE project_id=? ORDER BY score DESC",
+      )
+        .bind(id)
+        .all<Record<string, unknown>>();
+      if (d1Clips.results.length) {
+        firebaseClips = d1Clips.results;
+        await Promise.all(
+          firebaseClips.map((clip) =>
+            syncD1Record("clips", String(clip.id)),
+          ),
+        );
+        await firebasePatch("projects", id, {
+          clip_count: firebaseClips.length,
+          updated_at: Number(firebaseProject.updated_at || Date.now()),
+        });
+      }
+    }
+    if (!firebaseTranscript) {
+      const d1Transcript = await bindings.DB.prepare(
+        "SELECT * FROM transcripts WHERE project_id=?",
+      )
+        .bind(id)
+        .first<Record<string, unknown>>();
+      if (d1Transcript) {
+        firebaseTranscript = d1Transcript;
+        await syncD1Record("transcripts", id, "project_id");
+      }
+    }
+    firebaseClips.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
     return Response.json({
       project: firebaseProject,
       clips: firebaseClips,

@@ -28,6 +28,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Send,
   Settings,
   Share2,
@@ -170,6 +171,7 @@ type ProjectSummary = {
   clip_count?: number;
   duration?: number;
   updated_at?: number;
+  error?: string | null;
 };
 type Notice = {
   id: string;
@@ -344,6 +346,23 @@ export default function Home() {
         error instanceof Error ? error.message : "Project tidak dapat dibuka",
       );
     }
+  }
+
+  async function retryProject(project: ProjectSummary) {
+    setToast(`Memproses ulang “${project.title}”…`);
+    const response = await fetch(`/api/projects/${project.id}/process`, {
+      method: "POST",
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    await loadProjects();
+    if (!response.ok) {
+      setToast(result.error || "Pemrosesan ulang gagal");
+      return;
+    }
+    setToast("Analisis selesai. Klip berhasil dibuat.");
+    await openProject(project.id);
   }
 
   const filtered = useMemo(
@@ -857,6 +876,7 @@ export default function Home() {
             onUpload={() => setUploadOpen(true)}
             onChanged={loadProjects}
             onNotice={setToast}
+            onRetry={retryProject}
           />
         )}
         {(view === "published" ||
@@ -1651,12 +1671,14 @@ function ProjectsPage({
   onUpload,
   onChanged,
   onNotice,
+  onRetry,
 }: {
   projects: ProjectSummary[];
   onOpen: (id: string) => void;
   onUpload: () => void;
   onChanged: () => Promise<void>;
   onNotice: (message: string) => void;
+  onRetry: (project: ProjectSummary) => Promise<void>;
 }) {
   async function renameProject(project: ProjectSummary) {
     const title = window.prompt("Nama project baru", project.title)?.trim();
@@ -1732,7 +1754,9 @@ function ProjectsPage({
                 <span>
                   <strong>{project.title}</strong>
                   <small>
-                    {Math.round(project.duration || 0)} sec · Indonesian
+                    {project.status === "failed" && project.error
+                      ? project.error
+                      : `${Math.round(project.duration || 0)} sec · Indonesian`}
                   </small>
                 </span>
               </span>
@@ -1747,6 +1771,15 @@ function ProjectsPage({
                 className="project-row-actions"
                 onClick={(event) => event.stopPropagation()}
               >
+                {(project.status !== "complete" || !project.clip_count) && (
+                  <button
+                    aria-label="Proses ulang project"
+                    title="Proses ulang"
+                    onClick={() => void onRetry(project)}
+                  >
+                    <RefreshCw />
+                  </button>
+                )}
                 <button
                   aria-label="Rename project"
                   onClick={() => renameProject(project)}

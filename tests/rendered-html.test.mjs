@@ -86,6 +86,28 @@ test("new project accepts original files and honest direct video links", async (
   assert.match(await source("scripts/local-render-server.mjs"), /500M/);
 });
 
+test("local YouTube AI processing avoids worker memory limits and failed projects can retry", async () => {
+  const [gateway, renderer, processApi, projectApi, page] = await Promise.all([
+    source("scripts/local-ai-gateway.mjs"),
+    source("scripts/local-render-server.mjs"),
+    source("app/api/projects/[id]/process/route.ts"),
+    source("app/api/projects/[id]/route.ts"),
+    source("app/page.tsx"),
+  ]);
+  assert.match(gateway, /transcribe-url/);
+  assert.match(renderer, /request\.url === "\/transcribe-url"/);
+  assert.match(renderer, /yt-dlp/);
+  assert.match(renderer, /youtube-captions/);
+  assert.match(renderer, /--write-auto-subs/);
+  assert.match(renderer, /127\.0\.0\.1:8080\/inference/);
+  assert.match(processApi, /LOCAL_RENDER_BASE_URL/);
+  assert.match(processApi, /SELECT COUNT\(\*\) AS count FROM clips WHERE project_id=/);
+  assert.match(projectApi, /!firebaseClips\.length/);
+  assert.match(projectApi, /syncD1Record\("clips"/);
+  assert.match(page, /Proses ulang project/);
+  assert.match(page, /project\.status !== "complete" \|\| !project\.clip_count/);
+});
+
 test("real OpenAI and local AI pipelines replace fake output", async () => {
   const [processApi, ai] = await Promise.all([
     source("app/api/projects/[id]/process/route.ts"),

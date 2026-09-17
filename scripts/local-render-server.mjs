@@ -251,6 +251,157 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+  if (request.method === "POST" && request.url === "/transcribe-url") {
+    const work = await mkdtemp(join(tmpdir(), "kliyu-transcribe-"));
+    try {
+      const raw = await receive(request, 1024 * 1024);
+      const input = JSON.parse(raw.toString());
+      const sourceUrl = new URL(String(input.url || ""));
+      if (!/^https?:$/.test(sourceUrl.protocol))
+        throw new Error("Link video harus menggunakan HTTP atau HTTPS");
+      const captionTemplate = join(work, "captions");
+      try {
+        const preferredLanguages =
+          String(input.language) === "en" ? "en-orig" : "id-orig";
+        await run(
+          "yt-dlp",
+          [
+            "--no-playlist",
+            "--skip-download",
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs",
+            preferredLanguages,
+            "--sub-format",
+            "json3",
+            "-o",
+            captionTemplate,
+            sourceUrl.toString(),
+          ],
+          2 * 60 * 1000,
+        );
+        const captionName = (await readdir(work)).find((name) =>
+          name.endsWith(".json3"),
+        );
+        if (captionName) {
+          const captions = JSON.parse(
+            await readFile(join(work, captionName), "utf8"),
+          );
+          const segments = (captions.events || [])
+            .filter((event) => Array.isArray(event.segs))
+            .map((event) => {
+              const start = Number(event.tStartMs || 0) / 1000;
+              const text = event.segs
+                .map((segment) => String(segment.utf8 || ""))
+                .join("")
+                .replace(/\s+/g, " ")
+                .trim();
+              return {
+                start,
+                end: start + Number(event.dDurationMs || 0) / 1000,
+                text,
+              };
+            })
+            .filter((segment) => segment.text && segment.end > segment.start);
+          if (segments.length) {
+            const text = segments.map((segment) => segment.text).join(" ");
+            response.writeHead(200, {
+              "content-type": "application/json",
+              "cache-control": "no-store",
+            });
+            response.end(
+              JSON.stringify({
+                text,
+                segments,
+                language: String(input.language || "id"),
+                duration: Math.max(...segments.map((segment) => segment.end)),
+                provider: "youtube-captions",
+              }),
+            );
+            return;
+          }
+        }
+      } catch (captionError) {
+        console.error(
+          "Caption YouTube tidak tersedia, beralih ke Whisper:",
+          captionError instanceof Error ? captionError.message : captionError,
+        );
+        // Not every source provides captions; Whisper remains the local fallback.
+      }
+      const sourceTemplate = join(work, "audio-source.%(ext)s");
+      await run(
+        "yt-dlp",
+        [
+          "--no-playlist",
+          "--max-filesize",
+          "500M",
+          "-f",
+          "ba/b",
+          "-o",
+          sourceTemplate,
+          sourceUrl.toString(),
+        ],
+        30 * 60 * 1000,
+      );
+      const sourceName = (await readdir(work)).find((name) =>
+        name.startsWith("audio-source."),
+      );
+      if (!sourceName) throw new Error("Audio video tidak dapat diunduh");
+      const wavPath = join(work, "audio.wav");
+      await run(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          join(work, sourceName),
+          "-vn",
+          "-ar",
+          "16000",
+          "-ac",
+          "1",
+          "-c:a",
+          "pcm_s16le",
+          "-y",
+          wavPath,
+        ],
+        30 * 60 * 1000,
+      );
+      const form = new FormData();
+      form.append(
+        "file",
+        new File([await readFile(wavPath)], "audio.wav", { type: "audio/wav" }),
+      );
+      form.append("response_format", "verbose_json");
+      form.append("timestamp_granularities[]", "segment");
+      form.append("timestamp_granularities[]", "word");
+      if (["id", "en"].includes(String(input.language)))
+        form.append("language", String(input.language));
+      const transcription = await fetch("http://127.0.0.1:8080/inference", {
+        method: "POST",
+        body: form,
+      });
+      const result = await transcription.arrayBuffer();
+      response.writeHead(transcription.status, {
+        "content-type": transcription.headers.get("content-type") || "application/json",
+        "content-length": String(result.byteLength),
+        "cache-control": "no-store",
+      });
+      response.end(Buffer.from(result));
+    } catch (error) {
+      response.writeHead(422, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error:
+            error instanceof Error ? error.message : "Transkripsi link gagal",
+        }),
+      );
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+    return;
+  }
   if (request.method === "POST" && request.url === "/thumbnail") {
     const work = await mkdtemp(join(tmpdir(), "kliyu-thumbnail-"));
     try {

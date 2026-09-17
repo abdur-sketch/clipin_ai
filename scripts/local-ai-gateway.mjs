@@ -5,7 +5,7 @@ const token = process.env.KLIYU_GATEWAY_TOKEN || "";
 const allowed = [
   /^\/api\/(generate|tags)$/,
   /^\/inference$/,
-  /^\/(import|render|thumbnail)$/,
+  /^\/(import|render|thumbnail|transcribe-url)$/,
   /^\/progress\/[A-Za-z0-9_-]+$/,
   /^\/health$/,
 ];

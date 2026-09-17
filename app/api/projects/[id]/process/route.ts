@@ -51,10 +51,31 @@ function inferredWords(text: string, start: number, end: number) {
 }
 
 async function transcribe(
-  file: File,
+  file: File | null,
   language?: string,
+  sourceUrl?: string,
 ): Promise<TranscriptionResponse> {
   const provider = aiProvider();
+  if (provider === "ollama" && sourceUrl && bindings.LOCAL_RENDER_BASE_URL) {
+    const response = await fetch(
+      `${bindings.LOCAL_RENDER_BASE_URL.replace(/\/$/, "")}/transcribe-url`,
+      {
+        method: "POST",
+        headers: localAiHeaders({ "content-type": "application/json" }),
+        body: JSON.stringify({ url: sourceUrl, language }),
+      },
+    );
+    if (!response.ok) {
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      throw new Error(
+        result.error || `Transkripsi link gagal (${response.status})`,
+      );
+    }
+    return (await response.json()) as TranscriptionResponse;
+  }
+  if (!file) throw new Error("File video belum tersedia untuk transkripsi");
   const form = new FormData();
   form.append("file", file);
   form.append("response_format", "verbose_json");
@@ -153,7 +174,12 @@ export async function POST(
     .bind(projectId, user.id)
     .first<ProjectSource>();
   if (!project) return jsonError("Project tidak ditemukan", 404);
-  if (project.status === "complete")
+  const existingClips = await bindings.DB.prepare(
+    "SELECT COUNT(*) AS count FROM clips WHERE project_id=?",
+  )
+    .bind(projectId)
+    .first<{ count: number }>();
+  if (project.status === "complete" && Number(existingClips?.count || 0) > 0)
     return jsonError("Project ini sudah selesai diproses", 409);
   const provider = aiProvider();
   if (provider === "openai" && !bindings.OPENAI_API_KEY)
@@ -204,17 +230,27 @@ export async function POST(
       progress: 40,
       updated_at: Date.now(),
     });
-    const file = new File(
-      [await object.arrayBuffer()],
-      project.title.replace(/[^a-z0-9]+/gi, "-") + ".mp4",
-      {
-        type:
-          object.httpMetadata?.contentType ||
-          project.content_type ||
-          "video/mp4",
-      },
+    const useDirectUrl =
+      provider === "ollama" &&
+      Boolean(project.source_url) &&
+      Boolean(bindings.LOCAL_RENDER_BASE_URL);
+    const file = useDirectUrl
+      ? null
+      : new File(
+          [await object.arrayBuffer()],
+          project.title.replace(/[^a-z0-9]+/gi, "-") + ".mp4",
+          {
+            type:
+              object.httpMetadata?.contentType ||
+              project.content_type ||
+              "video/mp4",
+          },
+        );
+    const transcriptData = await transcribe(
+      file,
+      project.language,
+      useDirectUrl ? project.source_url : undefined,
     );
-    const transcriptData = await transcribe(file, project.language);
     const transcript = transcriptData.text?.trim();
     if (!transcript) throw new Error("Transkripsi kosong");
     const globalWords = transcriptData.words || [];
