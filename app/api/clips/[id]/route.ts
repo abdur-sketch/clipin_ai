@@ -123,7 +123,7 @@ export async function PATCH(
     hook = String(body.hook ?? "").trim();
   if (!title || !hook) return jsonError("Judul dan hook wajib diisi");
   await bindings.DB.prepare(
-    "UPDATE clips SET title=?,hook=?,caption=?,start_time=?,end_time=?,style=?,face_tracking=?,hook_overlay=?,captions_enabled=?,aspect_ratio=?,font_size=?,font_family=?,font_color=?,font_effect=?,title_effect=?,title_animation=?,title_position=?,caption_position=?,smart_cleanup=?,transcript_cut=?,audio_preset=?,speaker_colors=?,broll_start=?,subtitles=?,watermark=?,status='ready',rendered_key=NULL,updated_at=? WHERE id=?",
+    "UPDATE clips SET title=?,hook=?,caption=?,start_time=?,end_time=?,style=?,face_tracking=?,hook_overlay=?,captions_enabled=?,aspect_ratio=?,font_size=?,font_family=?,font_color=?,font_effect=?,title_effect=?,title_animation=?,title_position=?,caption_position=?,smart_cleanup=?,transcript_cut=?,audio_preset=?,noise_reduction=?,auto_level=?,speaker_colors=?,broll_start=?,subtitles=?,watermark=?,status='ready',rendered_key=NULL,updated_at=? WHERE id=?",
   )
     .bind(
       title,
@@ -149,6 +149,8 @@ export async function PATCH(
       ["natural", "podcast", "studio"].includes(String(body.audioPreset))
         ? String(body.audioPreset)
         : "podcast",
+      body.noiseReduction === false ? 0 : 1,
+      body.autoLevel === false ? 0 : 1,
       body.speakerColors ? 1 : 0,
       Math.max(0, Number(body.brollStart || 2)),
       JSON.stringify(subtitles),

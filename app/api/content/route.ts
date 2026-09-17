@@ -29,10 +29,13 @@ export async function GET() {
       .all(),
   ]);
   const publicationRows = published.results as Array<Record<string, unknown>>;
+  const livePublicationRows = publicationRows.filter(
+    (row) => row.status === "published",
+  );
   const revenueRows = revenue.results as Array<Record<string, unknown>>;
   const now = new Date(),
     monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const monthPublications = publicationRows.filter(
+  const monthPublications = livePublicationRows.filter(
     (row) => Number(row.published_at) >= monthStart,
   );
   const monthRevenue = revenueRows.filter(
@@ -58,12 +61,12 @@ export async function GET() {
       .map(([name, data]) => ({ name, ...data }))
       .sort((a, b) => b.total - a.total);
   const categoryStats = group(
-    publicationRows,
+    livePublicationRows,
     (row) => String(row.category || "Uncategorized"),
     (row) => Number(row.views || 0),
   );
   const durationStats = group(
-    publicationRows,
+    livePublicationRows,
     (row) => {
       const seconds = Number(row.duration || 0);
       return seconds <= 30
@@ -77,7 +80,7 @@ export async function GET() {
     (row) => Number(row.views || 0),
   );
   const hourStats = group(
-    publicationRows,
+    livePublicationRows,
     (row) =>
       `${new Date(Number(row.published_at)).getHours().toString().padStart(2, "0")}:00`,
     (row) => Number(row.views || 0),
@@ -127,6 +130,29 @@ export async function POST(request: Request) {
   const user = await currentUser(),
     body = (await request.json()) as Record<string, unknown>,
     action = String(body.action || "");
+  if (action === "schedule") {
+    const clipId = String(body.clipId || ""),
+      platform = String(body.platform || "").toLowerCase(),
+      scheduledAt = new Date(String(body.scheduledAt || "")).getTime();
+    if (!platforms.includes(platform)) return jsonError("Platform tidak valid");
+    if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now())
+      return jsonError("Jadwal harus berada di masa mendatang");
+    const clip = await bindings.DB.prepare(
+      "SELECT c.id,c.rendered_key FROM clips c JOIN projects p ON p.id=c.project_id WHERE c.id=? AND p.user_id=?",
+    )
+      .bind(clipId, user.id)
+      .first<Record<string, unknown>>();
+    if (!clip) return jsonError("Clip tidak ditemukan", 404);
+    if (!clip.rendered_key) return jsonError("Render clip sebelum menjadwalkan", 409);
+    const publicationId = id("pub"),
+      now = Date.now();
+    await bindings.DB.prepare(
+      "INSERT INTO publications (id,user_id,clip_id,platform,status,scheduled_at,published_at,external_url,views,likes,comments,shares,followers_gained,created_at,updated_at) VALUES (?,?,?,?,'scheduled',?,NULL,NULL,0,0,0,0,0,?,?)",
+    )
+      .bind(publicationId, user.id, clipId, platform, scheduledAt, now, now)
+      .run();
+    return Response.json({ ok: true, id: publicationId }, { status: 201 });
+  }
   if (action === "directPublish") {
     if (!bindings.PUBLISH_SERVICE_URL)
       return jsonError(

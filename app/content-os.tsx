@@ -19,7 +19,9 @@ type Publication = {
   title: string;
   platform: string;
   external_url: string;
-  published_at: number;
+  published_at?: number;
+  scheduled_at: number;
+  status: "scheduled" | "published" | "failed";
   views: number;
   likes: number;
   comments: number;
@@ -93,6 +95,12 @@ const compact = (value: number) =>
     maximumFractionDigits: 1,
   }).format(value || 0);
 const today = () => new Date().toISOString().slice(0, 10);
+const nextHour = () => {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  date.setMinutes(0, 0, 0);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
 
 export function ContentOS({
   mode,
@@ -183,6 +191,7 @@ function Published({
     [platform, setPlatform] = useState("instagram"),
     [url, setUrl] = useState(""),
     [date, setDate] = useState(today()),
+    [scheduleAt, setScheduleAt] = useState(nextHour()),
     [editing, setEditing] = useState<Publication | null>(null),
     [metrics, setMetrics] = useState({
       views: "",
@@ -226,6 +235,26 @@ function Published({
     setShow(false);
     await reload();
     notify("Clip berhasil dipublikasikan langsung");
+  }
+  async function schedule() {
+    const response = await fetch("/api/content", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "schedule",
+        clipId,
+        platform,
+        scheduledAt: new Date(scheduleAt).toISOString(),
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      notify(result.error || "Jadwal gagal dibuat");
+      return;
+    }
+    setShow(false);
+    await reload();
+    notify("Clip masuk kalender publikasi");
   }
   function edit(item: Publication) {
     setEditing(item);
@@ -302,8 +331,8 @@ function Published({
             <div>
               <strong>{item.title}</strong>
               <span>
-                {item.platform} ·{" "}
-                {new Date(item.published_at).toLocaleDateString("id-ID")}
+                {item.platform} · {item.status === "scheduled" ? "Terjadwal" : "Published"} ·{" "}
+                {new Date(item.published_at || item.scheduled_at).toLocaleString("id-ID")}
               </span>
             </div>
             <div className="published-metrics">
@@ -318,14 +347,16 @@ function Published({
               </span>
             </div>
             <div className="published-actions">
-              <a
-                href={item.external_url}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Buka konten"
-              >
-                <ExternalLink />
-              </a>
+              {item.external_url && (
+                <a
+                  href={item.external_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Buka konten"
+                >
+                  <ExternalLink />
+                </a>
+              )}
               <button onClick={() => edit(item)}>Update</button>
               <button aria-label="Hapus" onClick={() => remove(item.id)}>
                 <Trash2 />
@@ -386,8 +417,19 @@ function Published({
                 onChange={(e) => setDate(e.target.value)}
               />
             </label>
+            <label>
+              Jadwalkan publikasi
+              <input
+                type="datetime-local"
+                value={scheduleAt}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+            </label>
             <div>
               <button onClick={() => setShow(false)}>Cancel</button>
+              <button disabled={!clipId || !scheduleAt} onClick={schedule}>
+                Schedule
+              </button>
               <button disabled={!clipId} onClick={directPublish}>
                 Publish directly
               </button>

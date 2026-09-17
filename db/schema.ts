@@ -65,6 +65,12 @@ export const clips = sqliteTable("clips", {
     .notNull()
     .default(false),
   audioPreset: text("audio_preset").notNull().default("podcast"),
+  noiseReduction: integer("noise_reduction", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  autoLevel: integer("auto_level", { mode: "boolean" })
+    .notNull()
+    .default(true),
   speakerColors: integer("speaker_colors", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -184,6 +190,13 @@ export const userSettings = sqliteTable("user_settings", {
   publishNotifications: integer("publish_notifications", { mode: "boolean" })
     .notNull()
     .default(true),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const studioPreferences = sqliteTable("studio_preferences", {
+  userId: text("user_id").primaryKey(),
+  brandKit: text("brand_kit").notNull().default("{}"),
+  drafts: text("drafts").notNull().default("{}"),
   updatedAt: integer("updated_at").notNull(),
 });
 

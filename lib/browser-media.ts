@@ -21,6 +21,8 @@ export type BrowserMediaClip = {
   smartCleanup?: boolean;
   transcriptCut?: boolean;
   audioPreset?: string;
+  noiseReduction?: boolean;
+  autoLevel?: boolean;
   subtitles?: Array<{
     start: number;
     end: number;
@@ -238,9 +240,12 @@ async function sourceVideo(clip: BrowserMediaClip) {
   return video;
 }
 
-export async function createThumbnailInBrowser(clip: BrowserMediaClip) {
+async function thumbnailAt(clip: BrowserMediaClip, fraction: number) {
   const video = await sourceVideo(clip);
-  const target = Math.min(clip.endTime - 0.1, clip.startTime + Math.min(2, (clip.endTime - clip.startTime) / 3));
+  const target = Math.min(
+    clip.endTime - 0.1,
+    clip.startTime + Math.max(0.1, (clip.endTime - clip.startTime) * fraction),
+  );
   if (Math.abs(video.currentTime - target) > 0.05) {
     video.currentTime = target;
     await waitFor(video, "seeked");
@@ -258,6 +263,19 @@ export async function createThumbnailInBrowser(clip: BrowserMediaClip) {
       0.9,
     ),
   );
+}
+
+export async function createThumbnailInBrowser(clip: BrowserMediaClip) {
+  return thumbnailAt(clip, 0.2);
+}
+
+export async function createThumbnailVariantsInBrowser(
+  clip: BrowserMediaClip,
+) {
+  const variants: Blob[] = [];
+  for (const fraction of [0.16, 0.48, 0.78])
+    variants.push(await thumbnailAt(clip, fraction));
+  return variants;
 }
 
 export async function renderVideoInBrowser(
@@ -278,16 +296,43 @@ export async function renderVideoInBrowser(
   if (!context) throw new Error("Canvas tidak tersedia");
   const output = canvas.captureStream(30);
   let audioContext: AudioContext | undefined;
-  if (clip.audioPreset && clip.audioPreset !== "natural") {
+  if (
+    (clip.audioPreset && clip.audioPreset !== "natural") ||
+    clip.noiseReduction ||
+    clip.autoLevel
+  ) {
     audioContext = new AudioContext();
     const source = audioContext.createMediaElementSource(video);
     const compressor = audioContext.createDynamicsCompressor();
     const gain = audioContext.createGain();
-    compressor.threshold.value = clip.audioPreset === "studio" ? -28 : -22;
-    compressor.ratio.value = clip.audioPreset === "studio" ? 5 : 3;
-    gain.gain.value = clip.audioPreset === "studio" ? 1.18 : 1.08;
+    const highpass = audioContext.createBiquadFilter();
+    const lowpass = audioContext.createBiquadFilter();
+    highpass.type = "highpass";
+    highpass.frequency.value = clip.noiseReduction === false ? 20 : 80;
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = clip.noiseReduction === false ? 20000 : 14500;
+    compressor.threshold.value = clip.autoLevel === false
+      ? 0
+      : clip.audioPreset === "studio"
+        ? -28
+        : -22;
+    compressor.ratio.value = clip.autoLevel === false
+      ? 1
+      : clip.audioPreset === "studio"
+        ? 5
+        : 3;
+    gain.gain.value = clip.autoLevel === false
+      ? 1
+      : clip.audioPreset === "studio"
+        ? 1.18
+        : 1.08;
     const destination = audioContext.createMediaStreamDestination();
-    source.connect(compressor).connect(gain).connect(destination);
+    source
+      .connect(highpass)
+      .connect(lowpass)
+      .connect(compressor)
+      .connect(gain)
+      .connect(destination);
     destination.stream.getAudioTracks().forEach((track) => output.addTrack(track));
   } else {
     const capture = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream?.();

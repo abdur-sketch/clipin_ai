@@ -58,11 +58,15 @@ export async function POST(request: Request) {
       sourceType =
         host.includes("youtube.com") || host === "youtu.be"
           ? "youtube"
+          : host.includes("drive.google.com")
+            ? "google-drive"
+            : host.includes("dropbox.com")
+              ? "dropbox"
           : host.includes("tiktok.com")
             ? "tiktok"
             : host.includes("instagram.com")
               ? "instagram"
-              : "url";
+              : "direct-url";
     } catch {
       return jsonError("Link video tidak valid");
     }

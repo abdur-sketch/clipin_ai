@@ -13,6 +13,7 @@ import {
 } from "@/lib/browser-ai";
 import {
   createThumbnailInBrowser,
+  createThumbnailVariantsInBrowser,
   renderVideoInBrowser,
 } from "@/lib/browser-media";
 import {
@@ -96,6 +97,8 @@ type Clip = {
   smartCleanup?: boolean;
   transcriptCut?: boolean;
   audioPreset?: string;
+  noiseReduction?: boolean;
+  autoLevel?: boolean;
   speakerColors?: boolean;
   brollName?: string;
   brollStart?: number;
@@ -368,6 +371,12 @@ export default function Home() {
               : Boolean(item.smart_cleanup),
           transcriptCut: Boolean(item.transcript_cut),
           audioPreset: String(item.audio_preset || "podcast"),
+          noiseReduction:
+            item.noise_reduction === undefined
+              ? true
+              : Boolean(item.noise_reduction),
+          autoLevel:
+            item.auto_level === undefined ? true : Boolean(item.auto_level),
           speakerColors: Boolean(item.speaker_colors),
           brollName: item.broll_key
             ? String(item.broll_key).split("/").pop()
@@ -473,7 +482,23 @@ export default function Home() {
         provider: "source-captions",
       };
     }
-    setProgress(20);
+    if (
+      detail.project.source_type &&
+      detail.project.source_type !== "upload"
+    ) {
+      setProgress(18);
+      const imported = await fetch(`/api/projects/${projectId}/import`, {
+        method: "POST",
+      });
+      if (!imported.ok) {
+        const result = (await imported.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(result.error || "Video dari link cloud gagal diimpor");
+      }
+      setProgress(28);
+    }
+    setProgress(32);
     const mediaResponse = await fetch(`/api/projects/${projectId}/media`);
     if (!mediaResponse.ok)
       throw new Error(
@@ -609,6 +634,12 @@ export default function Home() {
                 : Boolean(item.smart_cleanup),
             transcriptCut: Boolean(item.transcript_cut),
             audioPreset: String(item.audio_preset || "podcast"),
+            noiseReduction:
+              item.noise_reduction === undefined
+                ? true
+                : Boolean(item.noise_reduction),
+            autoLevel:
+              item.auto_level === undefined ? true : Boolean(item.auto_level),
             speakerColors: Boolean(item.speaker_colors),
             brollName: item.broll_key
               ? String(item.broll_key).split("/").pop()
@@ -731,8 +762,9 @@ export default function Home() {
       setToast("Semua klip sudah selesai dirender");
       return;
     }
-    setToast(`${pending.length} klip masuk antrean render`);
-    for (const clip of pending) await renderClip(clip);
+    setToast(`${pending.length} klip masuk antrean batch render (2 sekaligus)`);
+    for (let index = 0; index < pending.length; index += 2)
+      await Promise.all(pending.slice(index, index + 2).map(renderClip));
   }
   function exportClip(clip: Clip) {
     if (typeof clip.id !== "string" || clip.status !== "rendered") {
@@ -769,6 +801,8 @@ export default function Home() {
             smartCleanup: updated.smartCleanup ?? true,
             transcriptCut: updated.transcriptCut ?? false,
             audioPreset: updated.audioPreset ?? "podcast",
+            noiseReduction: updated.noiseReduction ?? true,
+            autoLevel: updated.autoLevel ?? true,
             speakerColors: updated.speakerColors ?? false,
             brollStart: updated.brollStart ?? 2,
             watermark: updated.watermark ?? true,
@@ -2712,7 +2746,7 @@ function UploadModal({
     "viral" | "education" | "sales" | "story"
   >("viral");
   const steps = [
-    sourceMode === "link" ? "Membaca caption YouTube" : "Mengunggah video",
+    sourceMode === "link" ? "Mengambil sumber video" : "Mengunggah video",
     "Menyiapkan model di browser",
     "Membuat transkrip privat",
     "Browser AI memilih momen",
@@ -2724,11 +2758,18 @@ function UploadModal({
     try {
       const parsed = new URL(value);
       if (!/^https?:$/.test(parsed.protocol)) throw new Error();
-      if (
-        !/(^|\.)youtube\.com$/i.test(parsed.hostname) &&
-        !/(^|\.)youtu\.be$/i.test(parsed.hostname)
-      ) {
-        setLinkError("Saat ini link Browser AI mendukung YouTube. Untuk sumber lain, unggah file videonya.");
+      const supported =
+        /(^|\.)youtube\.com$/i.test(parsed.hostname) ||
+        /(^|\.)youtu\.be$/i.test(parsed.hostname) ||
+        /(^|\.)drive\.google\.com$/i.test(parsed.hostname) ||
+        /(^|\.)dropbox\.com$/i.test(parsed.hostname) ||
+        /(^|\.)storage\.googleapis\.com$/i.test(parsed.hostname) ||
+        /(^|\.)firebasestorage\.googleapis\.com$/i.test(parsed.hostname) ||
+        /\.(mp4|mov|webm|m4v)$/i.test(parsed.pathname);
+      if (!supported) {
+        setLinkError(
+          "Gunakan YouTube, Google Drive, Dropbox, Firebase Storage, R2, atau link MP4/WebM langsung.",
+        );
         return;
       }
       setLinkError("");
@@ -2768,8 +2809,8 @@ function UploadModal({
               <em>Klip terbaik keluar.</em>
             </h2>
             <p>
-              AI berjalan langsung di browser. Pilih video asli atau tempel
-              link YouTube yang memiliki caption.
+              AI berjalan langsung di browser. Pilih video asli, YouTube
+              bercaption, atau link file dari penyimpanan cloud.
             </p>
             {error && <div className="upload-error-banner">{error}</div>}
             <label className="project-name-field">
@@ -2874,7 +2915,7 @@ function UploadModal({
             ) : (
               <div className="link-source-panel">
                 <label htmlFor="new-project-video-link">
-                  Link video YouTube
+                  Link video atau penyimpanan cloud
                 </label>
                 <div
                   className={`video-link-input ${linkError ? "invalid" : ""}`}
@@ -2890,7 +2931,7 @@ function UploadModal({
                     onKeyDown={(event) => {
                       if (event.key === "Enter") submitLink();
                     }}
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="YouTube, Google Drive, Dropbox, atau https://.../video.mp4"
                     inputMode="url"
                     autoFocus
                   />
@@ -2902,8 +2943,8 @@ function UploadModal({
                   <small className="link-error">{linkError}</small>
                 ) : (
                   <small>
-                    Mendukung video publik. Gunakan hanya video milik Anda atau
-                    yang Anda punya izin untuk diproses.
+                    Drive dan Dropbox harus dapat diakses oleh siapa saja yang
+                    memiliki link. Gunakan hanya video yang boleh Anda proses.
                   </small>
                 )}
               </div>
@@ -2999,6 +3040,10 @@ function ClipEditor({
     clip.transcriptCut ?? false,
   );
   const [audioPreset, setAudioPreset] = useState(clip.audioPreset || "podcast");
+  const [noiseReduction, setNoiseReduction] = useState(
+    clip.noiseReduction ?? true,
+  );
+  const [autoLevel, setAutoLevel] = useState(clip.autoLevel ?? true);
   const [speakerColors, setSpeakerColors] = useState(
     clip.speakerColors ?? false,
   );
@@ -3006,6 +3051,7 @@ function ClipEditor({
   const [logoName, setLogoName] = useState(clip.logoName || "");
   const [brollName, setBrollName] = useState(clip.brollName || "");
   const [brollStart, setBrollStart] = useState(clip.brollStart ?? 2);
+  const [brollSuggestion, setBrollSuggestion] = useState("");
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("en");
   const [translationBusy, setTranslationBusy] = useState(false);
@@ -3017,6 +3063,7 @@ function ClipEditor({
   >(youtubeId && !clip.hasSourceMedia ? "ready" : "loading");
   const [mediaVersion, setMediaVersion] = useState(0);
   const [sourceUploadBusy, setSourceUploadBusy] = useState(false);
+  const [cloudDraftReady, setCloudDraftReady] = useState(false);
   const studioVideoRef = useRef<HTMLVideoElement>(null);
   const [startTime, setStartTime] = useState(clip.startTime ?? 0);
   const [endTime, setEndTime] = useState(clip.endTime ?? clip.duration);
@@ -3131,6 +3178,8 @@ function ClipEditor({
     smartCleanup,
     transcriptCut,
     audioPreset,
+    noiseReduction,
+    autoLevel,
     speakerColors,
     brollStart,
     watermark,
@@ -3152,6 +3201,61 @@ function ClipEditor({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [studioSnapshot, clip.id]);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/studio?clipId=${clip.id}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result) => {
+        if (active && result?.draft) restoreStudio(JSON.stringify(result.draft));
+      })
+      .catch(() => {})
+      .finally(() => active && setCloudDraftReady(true));
+    return () => {
+      active = false;
+    };
+  }, [clip.id]);
+  useEffect(() => {
+    if (!cloudDraftReady) return;
+    const timer = window.setTimeout(() => {
+      void fetch("/api/studio", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "draft",
+          clipId: String(clip.id),
+          value: JSON.parse(studioSnapshot),
+        }),
+      });
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [studioSnapshot, clip.id, cloudDraftReady]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoStudio();
+        else undoStudio();
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        toggleStudioPlayback();
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const direction = event.key === "ArrowLeft" ? -1 : 1;
+        const next = Math.max(startTime, Math.min(endTime, studioTime + direction));
+        setStudioTime(next);
+        if (studioVideoRef.current) studioVideoRef.current.currentTime = next;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // Keyboard handlers intentionally bind to the latest timeline state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startTime, endTime, studioTime]);
   function restoreStudio(value: string) {
     const state = JSON.parse(value);
     restoringRef.current = true;
@@ -3173,6 +3277,8 @@ function ClipEditor({
     setSmartCleanup(state.smartCleanup);
     setTranscriptCut(state.transcriptCut);
     setAudioPreset(state.audioPreset);
+    setNoiseReduction(state.noiseReduction ?? true);
+    setAutoLevel(state.autoLevel ?? true);
     setSpeakerColors(state.speakerColors);
     setBrollStart(state.brollStart);
     setWatermark(state.watermark);
@@ -3193,12 +3299,17 @@ function ClipEditor({
     historyRef.current.push(next);
     restoreStudio(next);
   }
-  function restoreAutosave() {
-    const draft = localStorage.getItem(`kliyu-editor-draft-${clip.id}`);
-    if (!draft) return onNotice("Belum ada autosave untuk klip ini");
+  async function restoreAutosave() {
+    let draft = localStorage.getItem(`kliyu-editor-draft-${clip.id}`);
     try {
+      if (!draft) {
+        const response = await fetch(`/api/studio?clipId=${clip.id}`);
+        const result = (await response.json()) as { draft?: unknown };
+        if (result.draft) draft = JSON.stringify(result.draft);
+      }
+      if (!draft) return onNotice("Belum ada autosave untuk klip ini");
       restoreStudio(draft);
-      onNotice("Autosave editor berhasil dipulihkan");
+      onNotice("Autosave cloud berhasil dipulihkan");
     } catch {
       onNotice("Autosave tidak dapat dibaca");
     }
@@ -3212,27 +3323,42 @@ function ClipEditor({
     setStyle(preset.style);
     onNotice(`Preset ${preset.name} diterapkan`);
   }
-  function saveBrandKit() {
-    localStorage.setItem(
-      "kliyu-brand-kit",
-      JSON.stringify({
-        fontFamily,
-        fontColor,
-        fontEffect,
-        titleEffect,
-        titleAnimation,
-        titlePosition,
-        captionPosition,
-        style,
-        watermark,
-      }),
+  async function saveBrandKit() {
+    const kit = {
+      fontFamily,
+      fontColor,
+      fontEffect,
+      titleEffect,
+      titleAnimation,
+      titlePosition,
+      captionPosition,
+      style,
+      watermark,
+    };
+    localStorage.setItem("kliyu-brand-kit", JSON.stringify(kit));
+    const response = await fetch("/api/studio", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "brandKit", value: kit }),
+    });
+    onNotice(
+      response.ok
+        ? "Brand Kit tersimpan di cloud"
+        : "Brand Kit tersimpan di perangkat",
     );
-    onNotice("Brand Kit tersimpan di perangkat ini");
   }
-  function applyBrandKit() {
-    const raw = localStorage.getItem("kliyu-brand-kit");
-    if (!raw) return onNotice("Simpan Brand Kit terlebih dahulu");
+  async function applyBrandKit() {
+    let raw = localStorage.getItem("kliyu-brand-kit");
     try {
+      const response = await fetch("/api/studio");
+      if (response.ok) {
+        const result = (await response.json()) as {
+          brandKit?: Record<string, unknown>;
+        };
+        if (result.brandKit && Object.keys(result.brandKit).length)
+          raw = JSON.stringify(result.brandKit);
+      }
+      if (!raw) return onNotice("Simpan Brand Kit terlebih dahulu");
       const kit = JSON.parse(raw);
       setFontFamily(kit.fontFamily || "system");
       setFontColor(kit.fontColor || "#FFFFFF");
@@ -3243,7 +3369,7 @@ function ClipEditor({
       setCaptionPosition(kit.captionPosition || "bottom");
       setStyle(kit.style || "Bold");
       setWatermark(kit.watermark ?? true);
-      onNotice("Brand Kit diterapkan");
+      onNotice("Brand Kit cloud diterapkan");
     } catch {
       onNotice("Brand Kit tidak valid");
     }
@@ -3278,6 +3404,7 @@ function ClipEditor({
   };
   const onSave = (updated: Clip) => {
     localStorage.removeItem(`kliyu-editor-draft-${clip.id}`);
+    void fetch(`/api/studio?clipId=${clip.id}`, { method: "DELETE" });
     persistClip({ ...updated, captionsEnabled: subtitle });
   };
   async function uploadLogo(file?: File) {
@@ -3397,6 +3524,45 @@ function ClipEditor({
       onNotice(
         error instanceof Error ? error.message : "Thumbnail gagal dibuat",
       );
+    } finally {
+      setThumbnailBusy(false);
+    }
+  }
+  async function generateThumbnailVariants() {
+    if (typeof clip.id !== "string") return;
+    setThumbnailBusy(true);
+    try {
+      if (youtubeId && !sourceAttached)
+        throw new Error("Pasang video asli sebelum membuat thumbnail.");
+      const variants = await createThumbnailVariantsInBrowser({
+        ...clip,
+        id: clip.id,
+        title,
+        hook: hookText,
+        startTime,
+        endTime,
+        aspectRatio: ratio,
+        fontSize,
+        fontFamily,
+        fontColor,
+        fontEffect,
+        titlePosition,
+        captionPosition,
+        hookOverlay: hook,
+        captionsEnabled: subtitle,
+        watermark,
+        subtitles: subtitleRows,
+      });
+      variants.forEach((blob, index) => {
+        const anchor = document.createElement("a");
+        anchor.href = URL.createObjectURL(blob);
+        anchor.download = `kliyu-thumbnail-${index + 1}.jpg`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
+      });
+      onNotice("3 alternatif thumbnail berhasil dibuat");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Thumbnail gagal dibuat");
     } finally {
       setThumbnailBusy(false);
     }
@@ -3522,6 +3688,54 @@ function ClipEditor({
       }),
     );
     onNotice("Kata filler dibersihkan dari transkrip");
+  }
+  function markSilentGaps() {
+    const sorted = subtitleRows
+      .filter((row) => !row.removed)
+      .slice()
+      .sort((a, b) => a.start - b.start);
+    const gaps: typeof subtitleRows = [];
+    for (let index = 1; index < sorted.length; index++) {
+      const start = sorted[index - 1].end;
+      const end = sorted[index].start;
+      if (end - start >= 0.65)
+        gaps.push({ start, end, text: "[Hening]", removed: true });
+    }
+    if (!gaps.length) return onNotice("Tidak ditemukan jeda panjang");
+    setSubtitleRows((rows) => [...rows, ...gaps].sort((a, b) => a.start - b.start));
+    setTranscriptCut(true);
+    onNotice(`${gaps.length} jeda panjang ditandai untuk dipotong`);
+  }
+  function cutAtPlayhead() {
+    const start = Math.max(startTime, studioTime - 0.5);
+    const end = Math.min(endTime, studioTime + 0.5);
+    if (end <= start) return;
+    setSubtitleRows((rows) => [
+      ...rows,
+      { start, end, text: "[Potongan manual]", removed: true },
+    ].sort((a, b) => a.start - b.start));
+    setTranscriptCut(true);
+    onNotice("Potongan 1 detik ditambahkan di posisi playhead");
+  }
+  function suggestBroll() {
+    const row = subtitleRows.find(
+      (item) => !item.removed && item.start >= startTime + 1,
+    );
+    if (!row) return onNotice("Transkrip belum cukup untuk saran B-roll");
+    const stopWords = new Set([
+      "yang", "dan", "atau", "dari", "untuk", "dengan", "pada", "ini",
+      "itu", "saya", "kita", "adalah", "akan", "tidak", "bisa",
+    ]);
+    const keywords = row.text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length > 4 && !stopWords.has(word))
+      .slice(0, 3)
+      .join(" · ");
+    setBrollStart(Math.max(0, row.start - startTime));
+    setBrollSuggestion(keywords || row.text.slice(0, 45));
+    onNotice("Waktu dan kata kunci B-roll sudah disarankan");
   }
   function mergeShortSubtitles() {
     setSubtitleRows((rows) => {
@@ -3816,6 +4030,16 @@ function ClipEditor({
                   value={speakerColors}
                   setValue={setSpeakerColors}
                 />
+                <Toggle
+                  label="Noise reduction"
+                  value={noiseReduction}
+                  setValue={setNoiseReduction}
+                />
+                <Toggle
+                  label="Auto level suara"
+                  value={autoLevel}
+                  setValue={setAutoLevel}
+                />
               </div>
               <label>
                 Audio AI
@@ -3842,6 +4066,12 @@ function ClipEditor({
                 </button>
                 <button onClick={generateThumbnail} disabled={thumbnailBusy}>
                   {thumbnailBusy ? "Memproses..." : "Smart thumbnail"}
+                </button>
+                <button
+                  onClick={generateThumbnailVariants}
+                  disabled={thumbnailBusy}
+                >
+                  3 thumbnail variants
                 </button>
               </div>
               <small>
@@ -4116,6 +4346,10 @@ function ClipEditor({
                 />
               </label>
             </div>
+            <button className="broll-suggestion" onClick={suggestBroll}>
+              <Sparkles /> Smart B-roll suggestion
+              {brollSuggestion && <small>{brollSuggestion}</small>}
+            </button>
             <label>
               Peningkatan audio
               <div className="style-options">
@@ -4225,6 +4459,8 @@ function ClipEditor({
               </div>
               <div className="subtitle-tools">
                 <button onClick={cleanTranscriptFillers}>Bersihkan filler</button>
+                <button onClick={markSilentGaps}>Potong jeda hening</button>
+                <button onClick={cutAtPlayhead}>Cut di playhead</button>
                 <button onClick={mergeShortSubtitles}>Gabungkan baris pendek</button>
                 <button onClick={resetTranscriptCuts}>Reset potongan</button>
                 <button onClick={() => downloadSubtitles("srt")}>Download SRT</button>
@@ -4371,6 +4607,8 @@ function ClipEditor({
                     smartCleanup,
                     transcriptCut,
                     audioPreset,
+                    noiseReduction,
+                    autoLevel,
                     speakerColors,
                     brollName,
                     brollStart,

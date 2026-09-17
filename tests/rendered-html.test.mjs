@@ -74,7 +74,7 @@ test("new project accepts original files and supported YouTube links", async () 
   );
   assert.match(page, /Project Name/);
   assert.match(page, /accept="video\/mp4,video\/quicktime"/);
-  assert.match(page, /Link video YouTube/);
+  assert.match(page, /Link video atau penyimpanan cloud/);
   assert.match(page, /Browser AI/);
   assert.match(page, /Target durasi klip/);
   assert.match(page, /Tujuan konten/);
@@ -191,6 +191,50 @@ test("Studio reports missing source media and lets the creator attach the origin
   assert.match(page, /onError=\{\(\) => setMediaState\("missing"\)\}/);
   assert.match(uploadApi, /bindings\.MEDIA\.put/);
   assert.match(uploadApi, /storage_key/);
+});
+
+test("cloud link imports, Studio recovery, enhanced audio, scheduling, and batch creation are wired", async () => {
+  const [
+    page,
+    projectApi,
+    importApi,
+    sourceImport,
+    studioApi,
+    browserMedia,
+    contentApi,
+    contentUi,
+    migration,
+  ] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/projects/route.ts"),
+    source("app/api/projects/[id]/import/route.ts"),
+    source("lib/source-import.ts"),
+    source("app/api/studio/route.ts"),
+    source("lib/browser-media.ts"),
+    source("app/api/content/route.ts"),
+    source("app/content-os.tsx"),
+    source("drizzle/0013_sturdy_lady_ursula.sql"),
+  ]);
+  for (const provider of ["Google Drive", "Dropbox", "Firebase Storage"])
+    assert.ok(page.includes(provider), `missing ${provider} import copy`);
+  assert.match(projectApi, /google-drive/);
+  assert.match(importApi, /bindings\.MEDIA\.put/);
+  assert.match(sourceImport, /drive\.usercontent\.google\.com/);
+  assert.match(sourceImport, /dl.*1/);
+  assert.match(studioApi, /studio_preferences/);
+  assert.match(page, /Autosave cloud berhasil dipulihkan/);
+  assert.match(page, /Noise reduction/);
+  assert.match(page, /Auto level suara/);
+  assert.match(page, /Potong jeda hening/);
+  assert.match(page, /Cut di playhead/);
+  assert.match(page, /Smart B-roll suggestion/);
+  assert.match(browserMedia, /createBiquadFilter/);
+  assert.match(browserMedia, /createThumbnailVariantsInBrowser/);
+  assert.match(page, /batch render \(2 sekaligus\)/);
+  assert.match(contentApi, /action === "schedule"/);
+  assert.match(contentUi, /Jadwalkan publikasi/);
+  assert.match(migration, /studio_preferences/);
+  assert.match(migration, /noise_reduction/);
 });
 
 test("advanced Studio tools persist and reach the cloud render adapter", async () => {
