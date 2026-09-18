@@ -294,6 +294,19 @@ function Published({
     await reload();
     notify("Catatan publikasi dihapus");
   }
+  const calendarDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + index);
+    const next = date.getTime() + 86400000;
+    return {
+      date,
+      items: data.publications.filter((item) => {
+        const value = item.published_at || item.scheduled_at;
+        return value >= date.getTime() && value < next;
+      }),
+    };
+  });
   return (
     <div className="page content-os-page">
       <PageHead
@@ -324,6 +337,27 @@ function Published({
           <strong>+{compact(data.summary.followers)}</strong>
         </article>
       </div>
+      <section className="visual-content-calendar">
+        <div>
+          <span className="modal-kicker">7-DAY CONTENT CALENDAR</span>
+          <h2>Jadwal publikasi</h2>
+        </div>
+        <div>
+          {calendarDays.map((day) => (
+            <article key={day.date.toISOString()} className={day.items.length ? "has-content" : ""}>
+              <span>{day.date.toLocaleDateString("id-ID", { weekday: "short" })}</span>
+              <strong>{day.date.getDate()}</strong>
+              {day.items.length ? (
+                day.items.slice(0, 2).map((item) => (
+                  <small key={item.id}>{item.platform} · {item.title.slice(0, 24)}</small>
+                ))
+              ) : (
+                <small>Slot kosong</small>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
       <div className="published-list">
         {data.publications.map((item) => (
           <article key={item.id}>
@@ -485,6 +519,17 @@ function Analytics({ data }: { data: Data }) {
       1,
       ...data.analytics.categoryStats.map((item) => item.total),
     );
+  const recommendations = [
+    bestCategory
+      ? `Prioritaskan kategori ${bestCategory.name}; kategori ini menghasilkan views tertinggi.`
+      : "Isi metrik views agar AI dapat menemukan kategori terbaik.",
+    bestDuration
+      ? `Gunakan durasi ${bestDuration.name} sebagai baseline klip berikutnya.`
+      : "Publikasikan beberapa durasi berbeda untuk menemukan retention terbaik.",
+    bestHour
+      ? `Jadwalkan konten utama mendekati ${bestHour.name}.`
+      : "Tambahkan waktu publikasi untuk menemukan jam terbaik.",
+  ];
   return (
     <div className="page content-os-page">
       <PageHead
@@ -524,6 +569,20 @@ function Analytics({ data }: { data: Data }) {
           </small>
         </article>
       </div>
+      <section className="feedback-loop-panel">
+        <div>
+          <TrendingUp />
+          <span>
+            <b>Analytics Feedback Loop</b>
+            <small>Rekomendasi berikut memakai performa konten Anda sendiri.</small>
+          </span>
+        </div>
+        {recommendations.map((item, index) => (
+          <p key={item}>
+            <b>0{index + 1}</b> {item}
+          </p>
+        ))}
+      </section>
       <section className="analytics-board">
         <div>
           <span className="modal-kicker">VIEWS BY CATEGORY</span>

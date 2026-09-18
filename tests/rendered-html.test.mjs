@@ -465,3 +465,30 @@ test("Creator Pro persists auto-reframe, transitions, caption motion, audio gain
   assert.match(schema, /cropFocusX/);
   assert.match(migration, /ADD `templates`/);
 });
+
+test("Creator Intelligence adds multi-track editing, scenes, Brand Voice, repurposing, calendar, feedback, and health checks", async () => {
+  const [page, content, studioApi, browserAi, schema, migration] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/content-os.tsx"),
+    source("app/api/studio/route.ts"),
+    source("lib/browser-ai.ts"),
+    source("db/schema.ts"),
+    source("drizzle/0015_bright_redwing.sql"),
+  ]);
+  for (const feature of [
+    "MULTI-TRACK",
+    "SCENE DETECTION",
+    "BRAND VOICE",
+    "AI B-ROLL PLAN",
+    "CONTENT REPURPOSING",
+    "THUMBNAIL A/B SCORE",
+    "PROJECT HEALTH",
+  ])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(content, /7-DAY CONTENT CALENDAR/);
+  assert.match(content, /Analytics Feedback Loop/);
+  assert.match(studioApi, /body\.action === "brandVoice"/);
+  assert.match(browserAi, /brandVoice/);
+  assert.match(schema, /brandVoice/);
+  assert.match(migration, /brand_voice/);
+});

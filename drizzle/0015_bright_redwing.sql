@@ -1,0 +1,1 @@
+ALTER TABLE `studio_preferences` ADD `brand_voice` text DEFAULT '{}' NOT NULL;

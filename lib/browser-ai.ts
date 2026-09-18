@@ -305,11 +305,17 @@ export async function generateSocialCaptionInBrowser(options: {
   title: string;
   hook: string;
   transcript: string;
+  brandVoice?: {
+    tone?: string;
+    audience?: string;
+    cta?: string;
+    bannedWords?: string;
+  };
 }) {
   try {
     const output = await browserPrompt(
       "Anda copywriter konten Indonesia. Balas hanya JSON valid tanpa markdown.",
-      `Buat caption sosial dari klip ini. Format {"hook":"...","caption":"...","cta":"...","hashtags":["#..."]}. Jangan mengarang fakta. Judul: ${options.title}\nHook: ${options.hook}\nTranskrip: ${options.transcript.slice(0, 5000)}`,
+      `Buat caption sosial dari klip ini. Format {"hook":"...","caption":"...","cta":"...","hashtags":["#..."]}. Jangan mengarang fakta. Gaya brand: ${options.brandVoice?.tone || "jelas dan menarik"}. Audiens: ${options.brandVoice?.audience || "penonton umum"}. CTA pilihan: ${options.brandVoice?.cta || "ajak menyimpan dan membagikan"}. Hindari kata: ${options.brandVoice?.bannedWords || "tidak ada"}. Judul: ${options.title}\nHook: ${options.hook}\nTranskrip: ${options.transcript.slice(0, 5000)}`,
     );
     if (output) {
       const parsed = JSON.parse(cleanModelJson(output)) as {
@@ -340,7 +346,9 @@ export async function generateSocialCaptionInBrowser(options: {
   return {
     hook: options.hook.slice(0, 180),
     caption: `${options.hook}\n\n${excerpt}`.slice(0, 1500),
-    cta: "Simpan video ini dan bagikan kepada teman yang membutuhkannya.",
+    cta:
+      options.brandVoice?.cta ||
+      "Simpan video ini dan bagikan kepada teman yang membutuhkannya.",
     hashtags: ["#KLIYU", "#ShortVideo", ...keywords.map((word) => `#${word.replace(/[^a-z0-9_]/g, "")}`)].slice(0, 8),
   };
 }

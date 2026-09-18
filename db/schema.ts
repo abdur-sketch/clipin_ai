@@ -203,6 +203,7 @@ export const studioPreferences = sqliteTable("studio_preferences", {
   brandKit: text("brand_kit").notNull().default("{}"),
   drafts: text("drafts").notNull().default("{}"),
   templates: text("templates").notNull().default("[]"),
+  brandVoice: text("brand_voice").notNull().default("{}"),
   updatedAt: integer("updated_at").notNull(),
 });
 

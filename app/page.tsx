@@ -2063,6 +2063,24 @@ function ProjectsPage({
   onNotice: (message: string) => void;
   onRetry: (project: ProjectSummary) => Promise<void>;
 }) {
+  const failedProjects = projects.filter((project) => project.status === "failed");
+  const emptyProjects = projects.filter(
+    (project) => project.status === "complete" && !project.clip_count,
+  );
+  const processingProjects = projects.filter(
+    (project) => project.status === "processing" || project.status === "draft",
+  );
+  const healthScore = projects.length
+    ? Math.max(
+        0,
+        Math.round(
+          100 -
+            ((failedProjects.length * 2 + emptyProjects.length + processingProjects.length * 0.5) /
+              projects.length) *
+              35,
+        ),
+      )
+    : 100;
   async function renameProject(project: ProjectSummary) {
     const title = window.prompt("Nama project baru", project.title)?.trim();
     if (!title || title === project.title) return;
@@ -2114,6 +2132,34 @@ function ProjectsPage({
           <Plus /> New project
         </button>
       </div>
+      <section className={`project-health-center ${healthScore >= 90 ? "healthy" : "attention"}`}>
+        <div className="health-score">
+          <strong>{healthScore}</strong>
+          <span>PROJECT HEALTH</span>
+        </div>
+        <div>
+          <span className="modal-kicker">WORKSPACE DIAGNOSTICS</span>
+          <h2>{healthScore >= 90 ? "Semua sistem sehat" : "Ada project yang perlu diperbaiki"}</h2>
+          <p>
+            {failedProjects.length} gagal · {emptyProjects.length} tanpa klip · {processingProjects.length} belum selesai
+          </p>
+        </div>
+        <div className="health-actions">
+          {failedProjects[0] && (
+            <button onClick={() => void onRetry(failedProjects[0])}>
+              <RefreshCw /> Perbaiki project gagal
+            </button>
+          )}
+          {emptyProjects[0] && (
+            <button onClick={() => void onRetry(emptyProjects[0])}>
+              <WandSparkles /> Analisis ulang project kosong
+            </button>
+          )}
+          {!failedProjects.length && !emptyProjects.length && (
+            <span><CheckCircle2 /> Tidak ada masalah kritis</span>
+          )}
+        </div>
+      </section>
       {projects.length ? (
         <div className="table-card">
           <div className="table-row table-head">
@@ -3242,6 +3288,20 @@ function ClipEditor({
   const [savedTemplates, setSavedTemplates] = useState<
     Array<{ name: string; settings: Record<string, unknown> }>
   >([]);
+  const [brandVoice, setBrandVoice] = useState({
+    tone: "Berani, ringkas, dan edukatif",
+    audience: "Kreator dan pemilik bisnis Indonesia",
+    cta: "Simpan dan bagikan video ini",
+    bannedWords: "",
+  });
+  const [sceneMarkers, setSceneMarkers] = useState<number[]>([]);
+  const [brollSuggestions, setBrollSuggestions] = useState<
+    Array<{ keyword: string; time: number }>
+  >([]);
+  const [repurposeItems, setRepurposeItems] = useState<
+    Array<{ format: string; content: string }>
+  >([]);
+  const [thumbnailScores, setThumbnailScores] = useState<number[]>([]);
   const [currentSubtitle, setCurrentSubtitle] = useState(
     subtitleRows.find(
       (item) => item.start <= startTime && item.end >= startTime,
@@ -3452,6 +3512,8 @@ function ClipEditor({
       .then((result) => {
         if (!active) return;
         if (Array.isArray(result?.templates)) setSavedTemplates(result.templates);
+        if (result?.brandVoice && Object.keys(result.brandVoice).length)
+          setBrandVoice((current) => ({ ...current, ...result.brandVoice }));
         if (result?.draft) restoreStudio(JSON.stringify(result.draft));
       })
       .catch(() => {})
@@ -3672,6 +3734,101 @@ function ClipEditor({
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "Template gagal dihapus");
     }
+  }
+  async function saveBrandVoice() {
+    const response = await fetch("/api/studio", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "brandVoice", value: brandVoice }),
+    });
+    onNotice(
+      response.ok
+        ? "Brand Voice tersimpan di cloud"
+        : "Brand Voice gagal disimpan",
+    );
+  }
+  function detectScenes() {
+    const rows = subtitleRows
+      .filter((row) => !row.removed && row.end >= startTime && row.start <= endTime)
+      .slice()
+      .sort((a, b) => a.start - b.start);
+    const markers = rows
+      .filter((row, index) => {
+        const previous = rows[index - 1];
+        return (
+          index > 0 &&
+          (row.start - previous.end > 0.55 || /[.!?]$/.test(previous.text.trim()))
+        );
+      })
+      .map((row) => row.start)
+      .filter((value, index, all) =>
+        index === 0 || value - all[index - 1] >= 2.5,
+      )
+      .slice(0, 12);
+    setSceneMarkers(markers);
+    onNotice(
+      markers.length
+        ? `${markers.length} batas adegan ditemukan`
+        : "Belum ditemukan pergantian adegan yang kuat",
+    );
+  }
+  function generateBrollPlan() {
+    const stopWords = new Set([
+      "yang", "dengan", "untuk", "dari", "pada", "adalah", "karena",
+      "dalam", "tidak", "akan", "bisa", "kita", "mereka", "sebuah",
+    ]);
+    const suggestions = subtitleRows
+      .filter((row) => !row.removed && row.start >= startTime && row.end <= endTime)
+      .map((row) => ({
+        time: Math.max(0, row.start - startTime),
+        keyword:
+          row.text
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((word) => word.length > 4 && !stopWords.has(word))
+            .slice(0, 3)
+            .join(" ") || row.text.slice(0, 32),
+      }))
+      .filter(
+        (item, index, all) =>
+          item.keyword && all.findIndex((value) => value.keyword === item.keyword) === index,
+      )
+      .slice(0, 5);
+    setBrollSuggestions(suggestions);
+    onNotice(`${suggestions.length} ide B-roll dibuat dari transkrip`);
+  }
+  function generateRepurposePack() {
+    const text = subtitleRows
+      .filter((row) => !row.removed)
+      .map((row) => row.text)
+      .join(" ")
+      .trim();
+    const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const points = (sentences.length ? sentences : [hookText]).slice(0, 6);
+    setRepurposeItems([
+      {
+        format: "Reels 30s",
+        content: `${hookText}\n\n${points.slice(0, 2).join(" ")}\n\n${brandVoice.cta}`,
+      },
+      {
+        format: "YouTube Shorts",
+        content: `${title}\n${points.slice(0, 3).join(" ")}`,
+      },
+      {
+        format: "Carousel 6 slides",
+        content: points.map((point, index) => `${index + 1}. ${point}`).join("\n"),
+      },
+      {
+        format: "Thread",
+        content: points.map((point, index) => `${index + 1}/${points.length} ${point}`).join("\n\n"),
+      },
+      {
+        format: "YouTube description",
+        content: `${hookText}\n\n${text.slice(0, 700)}\n\n${brandVoice.cta}`,
+      },
+    ]);
+    onNotice("Paket repurposing untuk 5 format selesai dibuat");
   }
   async function saveBrandKit() {
     const kit = {
@@ -3922,6 +4079,12 @@ function ClipEditor({
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
       });
+      const titleFit = Math.max(0, 12 - Math.abs(42 - title.length) / 4);
+      setThumbnailScores(
+        variants.map((_, index) =>
+          Math.min(98, Math.round(78 + titleFit + [5, 2, 7][index])),
+        ),
+      );
       onNotice("3 alternatif thumbnail berhasil dibuat");
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "Thumbnail gagal dibuat");
@@ -3972,6 +4135,7 @@ function ClipEditor({
         title,
         hook: hookText,
         transcript: subtitleRows.map((row) => row.text).join(" "),
+        brandVoice,
       });
       const response = await fetch(`/api/clips/${clip.id}/caption`, {
         method: "POST",
@@ -4327,6 +4491,68 @@ function ClipEditor({
               </div>
               <span>{Math.round(endTime)}s</span>
             </div>
+            <div className="multi-track-timeline" aria-label="Multi-track timeline">
+              <div className="track-ruler">
+                <b>MULTI-TRACK</b>
+                <span>{Math.round(studioTime - startTime)}s / {Math.round(endTime - startTime)}s</span>
+              </div>
+              {[
+                { name: "VIDEO", className: "video-track" },
+                { name: "CAPTION", className: "caption-track" },
+                { name: "B-ROLL", className: "broll-track" },
+                { name: "AUDIO", className: "audio-track" },
+              ].map((track) => (
+                <div className="timeline-track" key={track.name}>
+                  <span>{track.name}</span>
+                  <div className={track.className}>
+                    {track.name === "VIDEO" && <i style={{ left: 0, width: "100%" }} />}
+                    {track.name === "CAPTION" &&
+                      subtitleRows
+                        .filter((row) => !row.removed && row.end >= startTime && row.start <= endTime)
+                        .map((row, index) => (
+                          <button
+                            key={`${row.start}-${index}`}
+                            title={row.text}
+                            style={{
+                              left: `${Math.max(0, ((row.start - startTime) / Math.max(0.1, endTime - startTime)) * 100)}%`,
+                              width: `${Math.max(1.5, ((row.end - row.start) / Math.max(0.1, endTime - startTime)) * 100)}%`,
+                            }}
+                            onClick={() => {
+                              setStudioTime(row.start);
+                              if (studioVideoRef.current)
+                                studioVideoRef.current.currentTime = row.start;
+                            }}
+                          />
+                        ))}
+                    {track.name === "B-ROLL" && brollName && (
+                      <i
+                        style={{
+                          left: `${(brollStart / Math.max(0.1, endTime - startTime)) * 100}%`,
+                          width: `${Math.min(30, (3 / Math.max(0.1, endTime - startTime)) * 100)}%`,
+                        }}
+                      />
+                    )}
+                    {track.name === "AUDIO" &&
+                      Array.from({ length: 24 }, (_, index) => (
+                        <em key={index} style={{ height: `${25 + ((index * 29) % 65)}%` }} />
+                      ))}
+                    {sceneMarkers.map((marker) => (
+                      <strong
+                        key={`${track.name}-${marker}`}
+                        style={{
+                          left: `${((marker - startTime) / Math.max(0.1, endTime - startTime)) * 100}%`,
+                        }}
+                      />
+                    ))}
+                    <b
+                      style={{
+                        left: `${((studioTime - startTime) / Math.max(0.1, endTime - startTime)) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="studio-toolbar">
               <button onClick={undoStudio}>Undo</button>
               <button onClick={redoStudio}>Redo</button>
@@ -4337,6 +4563,7 @@ function ClipEditor({
               >
                 Safe area
               </button>
+              <button onClick={detectScenes}>Detect scenes</button>
               <label>
                 Zoom{" "}
                 <input
@@ -4554,6 +4781,32 @@ function ClipEditor({
                 </label>
               </div>
             </section>
+            <section className="scene-assist-panel">
+              <div>
+                <span>SCENE DETECTION</span>
+                <button onClick={detectScenes}>
+                  <Sparkles /> Analisis adegan
+                </button>
+              </div>
+              {sceneMarkers.length ? (
+                <div>
+                  {sceneMarkers.map((marker, index) => (
+                    <button
+                      key={marker}
+                      onClick={() => {
+                        setStudioTime(marker);
+                        if (studioVideoRef.current)
+                          studioVideoRef.current.currentTime = marker;
+                      }}
+                    >
+                      Scene {index + 1} · {marker.toFixed(1)}s
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <small>Temukan batas kalimat dan jeda yang aman untuk potongan.</small>
+              )}
+            </section>
             <label>
               Judul clip
               <input
@@ -4699,6 +4952,55 @@ function ClipEditor({
                 <small>Belum ada template tersimpan.</small>
               )}
             </section>
+            <section className="brand-voice-panel">
+              <div>
+                <span>BRAND VOICE</span>
+                <b>Gaya AI pribadi Anda</b>
+              </div>
+              <div className="advanced-grid">
+                <label>
+                  Nada bahasa
+                  <input
+                    value={brandVoice.tone}
+                    onChange={(event) =>
+                      setBrandVoice((value) => ({ ...value, tone: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Target audiens
+                  <input
+                    value={brandVoice.audience}
+                    onChange={(event) =>
+                      setBrandVoice((value) => ({ ...value, audience: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  CTA default
+                  <input
+                    value={brandVoice.cta}
+                    onChange={(event) =>
+                      setBrandVoice((value) => ({ ...value, cta: event.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Kata yang dihindari
+                  <input
+                    value={brandVoice.bannedWords}
+                    placeholder="murah, clickbait..."
+                    onChange={(event) =>
+                      setBrandVoice((value) => ({
+                        ...value,
+                        bannedWords: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <button onClick={saveBrandVoice}>Simpan Brand Voice</button>
+            </section>
             <button
               className="studio-feature-button"
               onClick={generateThumbnail}
@@ -4709,6 +5011,23 @@ function ClipEditor({
                 ? "Membuat thumbnail..."
                 : "Buat & unduh Smart Thumbnail"}
             </button>
+            {thumbnailScores.length > 0 && (
+              <section className="thumbnail-ab-panel">
+                <div>
+                  <span>THUMBNAIL A/B SCORE</span>
+                  <b>Pilih skor tertinggi</b>
+                </div>
+                <div>
+                  {thumbnailScores.map((score, index) => (
+                    <article key={index} className={score === Math.max(...thumbnailScores) ? "winner" : ""}>
+                      <span>Variant {String.fromCharCode(65 + index)}</span>
+                      <strong>{score}</strong>
+                      <small>{score >= 90 ? "Recommended" : "Good"}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
             <div className="time-fields">
               <label>
                 Start
@@ -4885,6 +5204,28 @@ function ClipEditor({
               <Sparkles /> Smart B-roll suggestion
               {brollSuggestion && <small>{brollSuggestion}</small>}
             </button>
+            <section className="broll-plan-panel">
+              <div>
+                <span>AI B-ROLL PLAN</span>
+                <button onClick={generateBrollPlan}>
+                  <Sparkles /> Buat rencana
+                </button>
+              </div>
+              {brollSuggestions.map((item) => (
+                <button
+                  key={`${item.time}-${item.keyword}`}
+                  onClick={() => {
+                    setBrollStart(item.time);
+                    setBrollSuggestion(item.keyword);
+                    onNotice(`B-roll “${item.keyword}” dipasang pada ${item.time.toFixed(1)}s`);
+                  }}
+                >
+                  <b>{item.time.toFixed(1)}s</b>
+                  <span>{item.keyword}</span>
+                  <Plus />
+                </button>
+              ))}
+            </section>
             <label>
               Peningkatan audio
               <div className="style-options">
@@ -5121,6 +5462,34 @@ function ClipEditor({
                 <small>
                   Generate hook, caption, CTA, dan hashtag dari isi clip.
                 </small>
+              )}
+            </section>
+            <section className="repurpose-panel">
+              <div>
+                <span>CONTENT REPURPOSING</span>
+                <button onClick={generateRepurposePack}>
+                  <WandSparkles /> Buat 5 format
+                </button>
+              </div>
+              {repurposeItems.length ? (
+                <div>
+                  {repurposeItems.map((item) => (
+                    <article key={item.format}>
+                      <b>{item.format}</b>
+                      <p>{item.content}</p>
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(item.content);
+                          onNotice(`${item.format} berhasil disalin`);
+                        }}
+                      >
+                        <Copy /> Copy
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <small>Ubah satu klip menjadi Reels, Shorts, carousel, thread, dan deskripsi.</small>
               )}
             </section>
             <div className="editor-actions">
