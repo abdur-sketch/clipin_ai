@@ -44,6 +44,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Settings,
   Share2,
@@ -568,6 +569,29 @@ export default function Home() {
     [filter, clipItems],
   );
 
+  async function uploadResumable(projectId: string, file: File) {
+    const started = await fetch(`/api/projects/${projectId}/resumable`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: file.name, contentType: file.type || "video/mp4", size: file.size }),
+    });
+    if (!started.ok) throw new Error((await started.json()).error || "Sesi upload gagal dibuat");
+    const { sessionId, chunkSize } = await started.json() as { sessionId:string; chunkSize:number };
+    const parts: Array<{partNumber:number;etag:string}> = [];
+    try {
+      for (let offset=0, partNumber=1; offset<file.size; offset+=chunkSize, partNumber++) {
+        const response = await fetch(`/api/projects/${projectId}/resumable?sessionId=${encodeURIComponent(sessionId)}&partNumber=${partNumber}`, { method:"PUT", headers:{"content-type":"application/octet-stream"}, body:file.slice(offset,Math.min(file.size,offset+chunkSize)) });
+        if(!response.ok) throw new Error((await response.json()).error || `Upload bagian ${partNumber} gagal`);
+        parts.push(await response.json());
+        setProgress(22 + Math.round(Math.min(file.size,offset+chunkSize)/file.size*28));
+      }
+      const completed=await fetch(`/api/projects/${projectId}/resumable`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"complete",sessionId,parts})});
+      if(!completed.ok) throw new Error((await completed.json()).error || "Upload gagal diselesaikan");
+    } catch(error) {
+      await fetch(`/api/projects/${projectId}/resumable?sessionId=${encodeURIComponent(sessionId)}`,{method:"DELETE"}).catch(()=>{});
+      throw error;
+    }
+  }
+
   async function startUpload(
     source?: File | string,
     projectName?: string,
@@ -605,13 +629,13 @@ export default function Home() {
       const { project } = (await created.json()) as { project: { id: string } };
       setProgress(22);
       if (file) {
-        const uploaded = await fetch(`/api/projects/${project.id}/upload`, {
-          method: "PUT",
-          headers: { "content-type": file.type || "video/mp4" },
-          body: file,
-        });
-        if (!uploaded.ok)
-          throw new Error((await uploaded.json()).error || "Upload gagal");
+        if (file.size > 12 * 1024 * 1024) await uploadResumable(project.id, file);
+        else {
+          const uploaded = await fetch(`/api/projects/${project.id}/upload`, {
+            method: "PUT", headers: { "content-type": file.type || "video/mp4" }, body: file,
+          });
+          if (!uploaded.ok) throw new Error((await uploaded.json()).error || "Upload gagal");
+        }
         setProgress(52);
       }
       const browserAnalysis = await analyzeProjectInBrowser(
@@ -1515,6 +1539,7 @@ function ClipsPage({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [hiddenDuplicateIds,setHiddenDuplicateIds]=useState<string[]>([]);
   const hotCount = items.filter((clip) => clip.score >= 85).length;
   const renderedCount = items.filter(
     (clip) => clip.status === "rendered",
@@ -1524,6 +1549,18 @@ function ClipsPage({
   const selectedClips = items.filter((clip) =>
     selectedIds.includes(String(clip.id)),
   );
+  const duplicatePairs=useMemo(()=>{
+    const words=(value:string)=>new Set(value.toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter((word)=>word.length>2));
+    const pairs:Array<{a:Clip;b:Clip;similarity:number}>=[];
+    for(let a=0;a<items.length;a++)for(let b=a+1;b<items.length;b++){
+      const left=words(`${items[a].title} ${items[a].hook}`),right=words(`${items[b].title} ${items[b].hook}`);
+      const intersection=[...left].filter((word)=>right.has(word)).length,union=new Set([...left,...right]).size;
+      const similarity=union?intersection/union:0;
+      if(similarity>=.55)pairs.push({a:items[a],b:items[b],similarity});
+    }
+    return pairs.sort((x,y)=>y.similarity-x.similarity);
+  },[items]);
+  const visibleFiltered=filtered.filter((clip)=>!hiddenDuplicateIds.includes(String(clip.id)));
   function toggleSelected(clip: Clip) {
     const id = String(clip.id);
     setSelectedIds((current) =>
@@ -1730,6 +1767,7 @@ function ClipsPage({
             ))}
         </section>
       )}
+      {duplicatePairs.length>0&&<section className="duplicate-panel"><div><Copy/><span><b>{duplicatePairs.length} kemiripan terdeteksi</b><small>KLIYU membandingkan judul dan hook agar feed tidak berulang.</small></span></div><button onClick={()=>{setHiddenDuplicateIds(duplicatePairs.map(({a,b})=>String(a.score>=b.score?b.id:a.id)));onNotice("Klip duplikat dengan skor lebih rendah disembunyikan")}}>Tampilkan versi terbaik</button></section>}
       {selectedIds.length > 0 && (
         <div className="batch-action-bar" role="toolbar" aria-label="Aksi klip terpilih">
           <div>
@@ -1747,9 +1785,9 @@ function ClipsPage({
           </div>
         </div>
       )}
-      {filtered.length ? (
+      {visibleFiltered.length ? (
         <div className="clips-grid">
-          {filtered.map((clip) => (
+          {visibleFiltered.map((clip) => (
             <ClipCard
               key={clip.id}
               clip={clip}
@@ -2098,6 +2136,9 @@ function ProjectsPage({
   onNotice: (message: string) => void;
   onRetry: (project: ProjectSummary) => Promise<void>;
 }) {
+  const [searchQuery,setSearchQuery]=useState("");
+  const [searchResults,setSearchResults]=useState<Array<{project_id:string;project_title:string;clip_id?:string;title:string;hook:string;score:number;kind:string}>>([]);
+  const [searching,setSearching]=useState(false);
   const failedProjects = projects.filter((project) => project.status === "failed");
   const emptyProjects = projects.filter(
     (project) => project.status === "complete" && !project.clip_count,
@@ -2153,6 +2194,11 @@ function ProjectsPage({
     await onChanged();
     onNotice("Project berhasil dihapus");
   }
+  useEffect(()=>{
+    if(searchQuery.trim().length<2)return;
+    const timer=window.setTimeout(async()=>{setSearching(true);try{const response=await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}`);const data=await response.json();setSearchResults(data.results||[])}finally{setSearching(false)}},280);
+    return()=>window.clearTimeout(timer);
+  },[searchQuery]);
   return (
     <div className="page projects-page">
       <div className="simple-heading">
@@ -2167,6 +2213,10 @@ function ProjectsPage({
           <Plus /> New project
         </button>
       </div>
+      <section className="semantic-search">
+        <label><Search/><input value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} placeholder="Cari judul, hook, caption, atau isi transkrip…"/><span>{searching?"Mencari…":"AI SEARCH"}</span></label>
+        {searchQuery.trim().length>=2&&searchResults.length>0&&<div>{searchResults.map((result,index)=><button key={`${result.kind}-${result.clip_id||result.project_id}-${index}`} onClick={()=>onOpen(result.project_id)}><span><b>{result.title}</b><small>{result.project_title} · {result.kind==="transcript"?"Transkrip":"Klip"}</small></span>{result.score>0&&<strong>{result.score}</strong>}</button>)}</div>}
+      </section>
       <section className={`project-health-center ${healthScore >= 90 ? "healthy" : "attention"}`}>
         <div className="health-score">
           <strong>{healthScore}</strong>
@@ -2709,6 +2759,10 @@ function SettingsPage({
     [email, setEmail] = useState(true),
     [processing, setProcessing] = useState(true),
     [publishing, setPublishing] = useState(true),
+    [retentionDays, setRetentionDays] = useState(30),
+    [highContrast, setHighContrast] = useState(false),
+    [reducedMotion, setReducedMotion] = useState(false),
+    [automaticBackup, setAutomaticBackup] = useState(true),
     [saving, setSaving] = useState(false);
   const [active, setActive] = useState("account");
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
@@ -2716,9 +2770,12 @@ function SettingsPage({
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const [storage, setStorage] = useState<{
     groups: Array<{ name: string; files: number; bytes: number }>;
+    assets: Array<{ key:string; name:string; category:string; bytes:number; uploaded:string }>;
     totalFiles: number;
     totalBytes: number;
-  }>({ groups: [], totalFiles: 0, totalBytes: 0 });
+  }>({ groups: [], assets: [], totalFiles: 0, totalBytes: 0 });
+  const [activities,setActivities]=useState<Array<{id:string;title:string;message:string;status:string;created_at:number}>>([]);
+  const [backups,setBackups]=useState<Array<{id:string;created_at:number;bytes:number}>>([]);
   function jump(id: string) {
     setActive(id);
     document
@@ -2738,9 +2795,20 @@ function SettingsPage({
           emailNotifications: email,
           processingNotifications: processing,
           publishNotifications: publishing,
+          retentionDays,
+          highContrast,
+          reducedMotion,
+          automaticBackup,
         }),
       });
       if (!response.ok) throw new Error("Gagal menyimpan");
+      if (automaticBackup) {
+        const backupResponse = await fetch("/api/backup", { method: "POST" });
+        if (backupResponse.ok) {
+          const data = await fetch("/api/backup").then((item) => item.json());
+          setBackups(data.backups || []);
+        }
+      }
       notify("Semua pengaturan berhasil disimpan");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Gagal menyimpan");
@@ -2760,6 +2828,10 @@ function SettingsPage({
         setEmail(Boolean(s.email_notifications));
         setProcessing(Boolean(s.processing_notifications));
         setPublishing(Boolean(s.publish_notifications));
+        setRetentionDays(Number(s.retention_days || 30));
+        setHighContrast(Boolean(s.high_contrast));
+        setReducedMotion(Boolean(s.reduced_motion));
+        setAutomaticBackup(s.automatic_backup === undefined ? true : Boolean(s.automatic_backup));
       })
       .catch(() => {});
     fetch("/api/capabilities")
@@ -2770,7 +2842,14 @@ function SettingsPage({
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => data && setStorage(data))
       .catch(() => {});
+    fetch("/api/activity").then((r)=>r.ok?r.json():null).then((data)=>data&&setActivities(data.activities||[])).catch(()=>{});
+    fetch("/api/backup").then((r)=>r.ok?r.json():null).then((data)=>data&&setBackups(data.backups||[])).catch(()=>{});
   }, []);
+  useEffect(()=>{
+    document.documentElement.classList.toggle("high-contrast",highContrast);
+    document.documentElement.classList.toggle("reduced-motion",reducedMotion);
+    return ()=>{document.documentElement.classList.remove("high-contrast","reduced-motion")};
+  },[highContrast,reducedMotion]);
   return (
     <div className="page settings-page">
       <div className="simple-heading">
@@ -2793,6 +2872,8 @@ function SettingsPage({
             ["notifications", "Notifications"],
             ["integrations", "Integrations"],
             ["storage", "Storage"],
+            ["privacy", "Privacy & access"],
+            ["activity", "Activity"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -2899,6 +2980,8 @@ function SettingsPage({
                 ["transcription", "Browser AI Transcription"],
                 ["momentDetection", "Browser AI Moment Detection"],
                 ["mp4Export", "Browser Video Export"],
+                ["cloudRender", "Cloud Render Worker"],
+                ["socialPublishing", "OAuth Social Publisher"],
               ].map(([key, label]) => (
                 <div key={key}>
                   <span>
@@ -2987,6 +3070,34 @@ function SettingsPage({
             >
               <Trash2 /> Bersihkan hasil render
             </button>
+            <div className="media-library">
+              <div><small>MEDIA LIBRARY</small><h2>File terbaru</h2></div>
+              {storage.assets.length ? storage.assets.slice(0,8).map((asset)=>(
+                <a key={asset.key} href={`/api/storage?key=${encodeURIComponent(asset.key)}`} target="_blank" rel="noreferrer">
+                  <span><b>{asset.name}</b><small>{asset.category}</small></span><strong>{(asset.bytes/1024/1024).toFixed(1)} MB</strong>
+                </a>
+              )):<p className="settings-empty">Belum ada media tersimpan.</p>}
+            </div>
+          </section>
+          <section id="settings-privacy" className="settings-panel">
+            <div><small>PRIVACY & ACCESSIBILITY</small><h2>Kontrol data dan tampilan</h2></div>
+            <div className="settings-fields">
+              <label>Retensi hasil render<select value={retentionDays} onChange={(e)=>setRetentionDays(Number(e.target.value))}><option value={7}>7 hari</option><option value={30}>30 hari</option><option value={90}>90 hari</option><option value={365}>1 tahun</option></select></label>
+            </div>
+            <Toggle label="Kontras tinggi" value={highContrast} setValue={setHighContrast}/>
+            <Toggle label="Kurangi animasi" value={reducedMotion} setValue={setReducedMotion}/>
+            <Toggle label="Backup otomatis" value={automaticBackup} setValue={setAutomaticBackup}/>
+            <div className="backup-actions">
+              <button className="primary" onClick={async()=>{const r=await fetch("/api/backup",{method:"POST"});if(!r.ok)return notify("Backup gagal dibuat");const data=await fetch("/api/backup").then(x=>x.json());setBackups(data.backups||[]);notify("Backup workspace berhasil dibuat")}}>Buat backup sekarang</button>
+              <a className="outline-button" href="/api/backup?download=1"><Download/> Unduh data saya</a>
+            </div>
+            {backups[0]&&<p className="backup-note">Backup terakhir {new Date(backups[0].created_at).toLocaleString("id-ID")} · {(backups[0].bytes/1024).toFixed(1)} KB</p>}
+          </section>
+          <section id="settings-activity" className="settings-panel">
+            <div><small>ACTIVITY CENTER</small><h2>Aktivitas dan status sistem</h2></div>
+            <div className="activity-list">
+              {activities.length?activities.map((item)=><article key={item.id} className={item.status}><i/><span><b>{item.title}</b><small>{item.message}</small></span><time>{new Date(item.created_at).toLocaleString("id-ID")}</time></article>):<p className="settings-empty">Aktivitas baru akan muncul setelah upload, backup, dan render.</p>}
+            </div>
           </section>
         </div>
       </div>
@@ -4573,6 +4684,14 @@ function ClipEditor({
     URL.revokeObjectURL(anchor.href);
     onNotice(`Subtitle ${format.toUpperCase()} berhasil diunduh`);
   }
+  const retentionScores=Array.from({length:12},(_,index)=>{
+    const from=startTime+((endTime-startTime)/12)*index,to=startTime+((endTime-startTime)/12)*(index+1);
+    const text=subtitleRows.filter((row)=>!row.removed&&row.end>=from&&row.start<=to).map((row)=>row.text).join(" ");
+    const density=text.split(/\s+/).filter(Boolean).length;
+    const hookBoost=index<2?12:0, sceneBoost=sceneMarkers.some((time)=>time>=from&&time<=to)?8:0;
+    return Math.max(28,Math.min(96,52+density*2+hookBoost+sceneBoost-index*2));
+  });
+  const retentionAverage=Math.round(retentionScores.reduce((sum,value)=>sum+value,0)/retentionScores.length);
   return (
     <div className="modal-backdrop editor-backdrop">
       <section className="editor-modal" role="dialog" aria-modal="true">
@@ -4855,6 +4974,11 @@ function ClipEditor({
                   </span>
                 ))}
               </div>
+            </section>
+            <section className="retention-map-panel">
+              <div><span>AI RETENTION MAP</span><b>{retentionAverage}% prediksi bertahan</b></div>
+              <div className="retention-bars">{retentionScores.map((score,index)=><i key={index} style={{height:`${score}%`}} className={score<55?"risk":""}><small>{index*5}s</small></i>)}</div>
+              <p>{Math.min(...retentionScores)<55?"Area merah berisiko kehilangan penonton. Perpendek jeda atau tambahkan perubahan visual.":"Alur cukup padat. Hook dan perubahan visual tersebar dengan baik."}</p>
             </section>
             <section className="quality-control-panel">
               <div>

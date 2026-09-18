@@ -526,3 +526,25 @@ test("production suite includes quality control, export presets, music ducking, 
   assert.match(worker, /kliyu-shell-v1/);
   assert.match(migration, /CREATE TABLE `clip_versions`/);
 });
+
+test("reliability suite includes resumable uploads, semantic search, duplicate detection, retention, backup, media, activity, and accessibility", async () => {
+  const [page, resumable, search, backup, activity, storage, schema, migration] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/projects/[id]/resumable/route.ts"),
+    source("app/api/search/route.ts"),
+    source("app/api/backup/route.ts"),
+    source("app/api/activity/route.ts"),
+    source("app/api/storage/route.ts"),
+    source("db/schema.ts"),
+    source("drizzle/0017_soft_drax.sql"),
+  ]);
+  for (const feature of ["AI SEARCH", "kemiripan terdeteksi", "AI RETENTION MAP", "MEDIA LIBRARY", "ACTIVITY CENTER", "PRIVACY & ACCESSIBILITY"])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(resumable, /createMultipartUpload/);
+  assert.match(search, /transcripts\.text LIKE/);
+  assert.match(backup, /workspace_backups/);
+  assert.match(activity, /activity_logs/);
+  assert.match(storage, /assets:/);
+  assert.match(schema, /automaticBackup/);
+  assert.match(migration, /CREATE TABLE `upload_sessions`/);
+});

@@ -203,7 +203,50 @@ export const userSettings = sqliteTable("user_settings", {
   publishNotifications: integer("publish_notifications", { mode: "boolean" })
     .notNull()
     .default(true),
+  retentionDays: integer("retention_days").notNull().default(30),
+  highContrast: integer("high_contrast", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  reducedMotion: integer("reduced_motion", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  automaticBackup: integer("automatic_backup", { mode: "boolean" })
+    .notNull()
+    .default(true),
   updatedAt: integer("updated_at").notNull(),
+});
+
+export const uploadSessions = sqliteTable("upload_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  projectId: text("project_id").notNull(),
+  storageKey: text("storage_key").notNull(),
+  uploadId: text("upload_id").notNull(),
+  filename: text("filename").notNull(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+  completedParts: text("completed_parts").notNull().default("[]"),
+  status: text("status").notNull().default("uploading"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const activityLogs = sqliteTable("activity_logs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("info"),
+  metadata: text("metadata").notNull().default("{}"),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const workspaceBackups = sqliteTable("workspace_backups", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  snapshot: text("snapshot").notNull(),
+  createdAt: integer("created_at").notNull(),
 });
 
 export const studioPreferences = sqliteTable("studio_preferences", {
