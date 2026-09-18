@@ -417,3 +417,24 @@ test("published content, analytics, monetization, and AI caption are fully wired
   assert.match(migration, /post_caption/);
   assert.match(migration, /followers_gained/);
 });
+
+test("creator workflow includes render readiness, platform presets, hook variants, and batch clip actions", async () => {
+  const [page, css] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+  ]);
+  for (const feature of [
+    "RENDER READINESS",
+    "TikTok",
+    "Instagram Reels",
+    "YouTube Shorts",
+    "Square Feed",
+    "HOOK VARIANTS",
+    "Render selected",
+    "Export selected",
+  ])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(css, /\.render-readiness/);
+  assert.match(css, /\.platform-presets/);
+  assert.match(css, /\.batch-action-bar/);
+});

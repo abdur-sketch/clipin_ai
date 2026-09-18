@@ -1439,12 +1439,48 @@ function ClipsPage({
   onCancelRender: (clip: Clip) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const hotCount = items.filter((clip) => clip.score >= 85).length;
   const renderedCount = items.filter(
     (clip) => clip.status === "rendered",
   ).length;
   const readyCount = items.filter((clip) => clip.status === "ready").length;
   const topScore = Math.max(0, ...items.map((clip) => clip.score));
+  const selectedClips = items.filter((clip) =>
+    selectedIds.includes(String(clip.id)),
+  );
+  function toggleSelected(clip: Clip) {
+    const id = String(clip.id);
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    );
+  }
+  async function renderSelected() {
+    const pending = selectedClips.filter((clip) => clip.status !== "rendered");
+    if (!pending.length)
+      return onNotice("Pilih klip yang belum dirender terlebih dahulu");
+    onNotice(`${pending.length} klip terpilih masuk antrean render`);
+    for (let index = 0; index < pending.length; index += 2)
+      await Promise.all(pending.slice(index, index + 2).map(onRender));
+  }
+  function exportSelected() {
+    const ready = selectedClips.filter(
+      (clip) => clip.status === "rendered" && typeof clip.id === "string",
+    );
+    if (!ready.length)
+      return onNotice("Belum ada klip terpilih yang siap diekspor");
+    ready.forEach((clip, index) => {
+      window.setTimeout(() => {
+        const anchor = document.createElement("a");
+        anchor.href = `/api/clips/${clip.id}/download`;
+        anchor.download = "";
+        anchor.click();
+      }, index * 180);
+    });
+    onNotice(`${ready.length} video terpilih mulai diunduh`);
+  }
   function downloadReport() {
     const report = [
       `KLIYU — ${projectTitle}`,
@@ -1589,6 +1625,23 @@ function ClipsPage({
           <ArrowRight />
         </button>
       </div>
+      {selectedIds.length > 0 && (
+        <div className="batch-action-bar" role="toolbar" aria-label="Aksi klip terpilih">
+          <div>
+            <CheckCircle2 />
+            <b>{selectedIds.length} klip dipilih</b>
+            <button onClick={() => setSelectedIds([])}>Hapus pilihan</button>
+          </div>
+          <div>
+            <button onClick={renderSelected} disabled={renderingIds.length > 0}>
+              <Sparkles /> Render selected
+            </button>
+            <button onClick={exportSelected}>
+              <Download /> Export selected
+            </button>
+          </div>
+        </div>
+      )}
       {filtered.length ? (
         <div className="clips-grid">
           {filtered.map((clip) => (
@@ -1602,6 +1655,8 @@ function ClipsPage({
               rendering={renderingIds.includes(String(clip.id))}
               progress={renderProgress[String(clip.id)] || 0}
               onCancel={() => onCancelRender(clip)}
+              selected={selectedIds.includes(String(clip.id))}
+              onSelect={() => toggleSelected(clip)}
             />
           ))}
         </div>
@@ -1626,6 +1681,8 @@ function ClipCard({
   rendering,
   progress,
   onCancel,
+  selected,
+  onSelect,
 }: {
   clip: Clip;
   onEdit: () => void;
@@ -1635,10 +1692,20 @@ function ClipCard({
   rendering: boolean;
   progress: number;
   onCancel: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <article className="clip-card">
+    <article className={`clip-card ${selected ? "selected" : ""}`}>
       <div className={`clip-preview ${clip.accent}`}>
+        <button
+          className="clip-select"
+          aria-label={`${selected ? "Batalkan pilihan" : "Pilih"} ${clip.title}`}
+          aria-pressed={selected}
+          onClick={onSelect}
+        >
+          {selected ? <Check /> : <Plus />}
+        </button>
         <ClipThumbnail clip={clip} />
         <div className="clip-score">
           <span>
@@ -3079,6 +3146,7 @@ function ClipEditor({
       clip.postHashtags || [],
     ),
     [captionBusy, setCaptionBusy] = useState(false);
+  const [hookVariants, setHookVariants] = useState<string[]>([]);
   const [currentSubtitle, setCurrentSubtitle] = useState(
     subtitleRows.find(
       (item) => item.start <= startTime && item.end >= startTime,
@@ -3140,6 +3208,44 @@ function ClipEditor({
       style: "Bold",
     },
   ];
+  const platformPresets = [
+    {
+      name: "TikTok",
+      detail: "9:16 · punchy",
+      ratio: "9:16",
+      captionPosition: "bottom",
+      titlePosition: "top",
+      fontSize: 48,
+      style: "Karaoke",
+    },
+    {
+      name: "Instagram Reels",
+      detail: "9:16 · clean",
+      ratio: "9:16",
+      captionPosition: "center",
+      titlePosition: "top",
+      fontSize: 46,
+      style: "Bold",
+    },
+    {
+      name: "YouTube Shorts",
+      detail: "9:16 · safe UI",
+      ratio: "9:16",
+      captionPosition: "bottom",
+      titlePosition: "top",
+      fontSize: 44,
+      style: "Bold",
+    },
+    {
+      name: "Square Feed",
+      detail: "1:1 · compact",
+      ratio: "1:1",
+      captionPosition: "bottom",
+      titlePosition: "top",
+      fontSize: 40,
+      style: "Clean",
+    },
+  ];
   const activeSubtitle = subtitleRows.find(
     (item) =>
       !item.removed && item.start <= studioTime && item.end >= studioTime,
@@ -3156,6 +3262,44 @@ function ClipEditor({
         ) % 4
       ]
     : fontColor;
+  const renderChecks = [
+    {
+      label: "Video sumber tersedia",
+      ready: sourceAttached || (!youtubeId && mediaState === "ready"),
+    },
+    {
+      label: "Durasi klip valid (1–90 detik)",
+      ready: endTime > startTime && endTime - startTime <= 90,
+    },
+    {
+      label: "Judul dan hook terisi",
+      ready: Boolean(title.trim() && hookText.trim()),
+    },
+    {
+      label: "Subtitle siap",
+      ready:
+        !subtitle ||
+        subtitleRows.some(
+          (row) =>
+            !row.removed &&
+            row.text.trim() &&
+            row.end >= startTime &&
+            row.start <= endTime,
+        ),
+    },
+    {
+      label: "Format platform dipilih",
+      ready: Boolean(ratio && captionPosition),
+    },
+    {
+      label: "Audio sudah dioptimalkan",
+      ready: Boolean(audioPreset && autoLevel),
+    },
+  ];
+  const readinessScore = Math.round(
+    (renderChecks.filter((item) => item.ready).length / renderChecks.length) *
+      100,
+  );
   const historyRef = useRef<string[]>([]),
     futureRef = useRef<string[]>([]),
     restoringRef = useRef(false);
@@ -3322,6 +3466,25 @@ function ClipEditor({
     setTitleAnimation(preset.titleAnimation);
     setStyle(preset.style);
     onNotice(`Preset ${preset.name} diterapkan`);
+  }
+  function applyPlatformPreset(preset: (typeof platformPresets)[number]) {
+    setRatio(preset.ratio);
+    setCaptionPosition(preset.captionPosition);
+    setTitlePosition(preset.titlePosition);
+    setFontSize(preset.fontSize);
+    setStyle(preset.style);
+    setSafeArea(true);
+    onNotice(`Preset ${preset.name} siap digunakan`);
+  }
+  function generateHookVariants() {
+    const core = (hookText || title).replace(/[.!?]+$/, "").trim();
+    const subject = title.replace(/[.!?]+$/, "").trim();
+    setHookVariants([
+      `Jangan lewatkan ini: ${core}`.slice(0, 160),
+      `Kesalahan terbesar tentang ${subject.toLowerCase()}`.slice(0, 160),
+      `Ini alasan ${subject.toLowerCase()} penting untuk kamu`.slice(0, 160),
+    ]);
+    onNotice("3 variasi hook dibuat di browser");
   }
   async function saveBrandKit() {
     const kit = {
@@ -3990,6 +4153,25 @@ function ClipEditor({
             </div>
           </div>
           <div className="editor-controls">
+            <section className={`render-readiness ${readinessScore === 100 ? "ready" : ""}`}>
+              <div className="readiness-heading">
+                <div>
+                  <span>RENDER READINESS</span>
+                  <b>{readinessScore === 100 ? "Siap dirender" : "Perlu dilengkapi"}</b>
+                </div>
+                <strong>{readinessScore}%</strong>
+              </div>
+              <div className="readiness-progress" aria-label={`Kesiapan render ${readinessScore}%`}>
+                <span style={{ width: `${readinessScore}%` }} />
+              </div>
+              <div className="readiness-checks">
+                {renderChecks.map((item) => (
+                  <span className={item.ready ? "done" : "pending"} key={item.label}>
+                    {item.ready ? <Check /> : <X />} {item.label}
+                  </span>
+                ))}
+              </div>
+            </section>
             {youtubeId && !sourceAttached && (
               <section className="source-required-card">
                 <FileVideo2 />
@@ -4079,6 +4261,30 @@ function ClipEditor({
                 transkrip aktif.
               </small>
             </section>
+            <section className="platform-presets">
+              <div>
+                <span>PLATFORM PRESETS</span>
+                <b>Satu klik, langsung sesuai platform</b>
+              </div>
+              <div>
+                {platformPresets.map((preset) => (
+                  <button
+                    key={preset.name}
+                    className={
+                      ratio === preset.ratio &&
+                      captionPosition === preset.captionPosition &&
+                      style === preset.style
+                        ? "active"
+                        : ""
+                    }
+                    onClick={() => applyPlatformPreset(preset)}
+                  >
+                    <strong>{preset.name}</strong>
+                    <small>{preset.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
             <label>
               Judul clip
               <input
@@ -4093,6 +4299,32 @@ function ClipEditor({
                 onChange={(event) => setHookText(event.target.value)}
               />
             </label>
+            <section className="hook-variants">
+              <div>
+                <span>HOOK VARIANTS</span>
+                <button onClick={generateHookVariants}>
+                  <WandSparkles /> Buat 3 variasi
+                </button>
+              </div>
+              {hookVariants.length ? (
+                <div>
+                  {hookVariants.map((variant, index) => (
+                    <button
+                      key={variant}
+                      onClick={() => {
+                        setHookText(variant);
+                        onNotice(`Hook variasi ${index + 1} diterapkan`);
+                      }}
+                    >
+                      <b>0{index + 1}</b>
+                      <span>{variant}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <small>Buat beberapa pembuka agar Anda bisa memilih hook paling kuat.</small>
+              )}
+            </section>
             <label>
               Efek teks judul / hook
               <div className="font-effect-options title-effect-options">
