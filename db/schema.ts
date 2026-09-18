@@ -249,6 +249,16 @@ export const workspaceBackups = sqliteTable("workspace_backups", {
   createdAt: integer("created_at").notNull(),
 });
 
+export const workspaceMembers = sqliteTable("workspace_members", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("reviewer"),
+  status: text("status").notNull().default("invited"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const studioPreferences = sqliteTable("studio_preferences", {
   userId: text("user_id").primaryKey(),
   brandKit: text("brand_kit").notNull().default("{}"),

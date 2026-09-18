@@ -548,3 +548,23 @@ test("reliability suite includes resumable uploads, semantic search, duplicate d
   assert.match(schema, /automaticBackup/);
   assert.match(migration, /CREATE TABLE `upload_sessions`/);
 });
+
+test("production v33 adds diagnostics, recovery, OAuth readiness, team roles, caption intelligence, mastering, prediction, and template exchange", async () => {
+  const [page, diagnostics, jobs, integrations, team, schema, migration] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/diagnostics/route.ts"),
+    source("app/api/jobs/route.ts"),
+    source("app/api/integrations/route.ts"),
+    source("app/api/team/route.ts"),
+    source("db/schema.ts"),
+    source("drizzle/0018_abnormal_starjammers.sql"),
+  ]);
+  for (const feature of ["PRODUCTION COMMAND CENTER", "TEAM COLLABORATION", "PLATFORM CONNECTIONS", "CONTENT PERFORMANCE PREDICTION", "Caption intelligence", "Master audio", "Detect speakers", "Export pack", "Import pack"])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(diagnostics, /Background render/);
+  assert.match(jobs, /recover-failed/);
+  assert.match(integrations, /oauth\/start/);
+  assert.match(team, /workspace_members/);
+  assert.match(schema, /workspaceMembers/);
+  assert.match(migration, /CREATE TABLE `workspace_members`/);
+});

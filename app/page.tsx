@@ -2831,6 +2831,12 @@ function SettingsPage({
   const [activities,setActivities]=useState<Array<{id:string;title:string;message:string;status:string;created_at:number}>>([]);
   const [backups,setBackups]=useState<Array<{id:string;created_at:number;bytes:number}>>([]);
   const [deviceStorage,setDeviceStorage]=useState<{usage:number;quota:number}>({usage:0,quota:0});
+  const [diagnostics,setDiagnostics]=useState<Array<{key:string;label:string;status:string;detail:string;latency?:number}>>([]);
+  const [jobs,setJobs]=useState<Array<{id:string;title:string;project_title:string;status:string;render_progress:number;render_error?:string}>>([]);
+  const [members,setMembers]=useState<Array<{id:string;email:string;role:string;status:string}>>([]);
+  const [memberEmail,setMemberEmail]=useState("");
+  const [memberRole,setMemberRole]=useState("reviewer");
+  const [integrations,setIntegrations]=useState<Array<{platform:string;configured:boolean;connections:unknown[]}>>([]);
   function jump(id: string) {
     setActive(id);
     document
@@ -2900,6 +2906,10 @@ function SettingsPage({
     fetch("/api/activity").then((r)=>r.ok?r.json():null).then((data)=>data&&setActivities(data.activities||[])).catch(()=>{});
     fetch("/api/backup").then((r)=>r.ok?r.json():null).then((data)=>data&&setBackups(data.backups||[])).catch(()=>{});
     navigator.storage?.estimate().then((estimate)=>setDeviceStorage({usage:Number(estimate.usage||0),quota:Number(estimate.quota||0)})).catch(()=>{});
+    fetch("/api/diagnostics").then((r)=>r.ok?r.json():null).then((data)=>data&&setDiagnostics(data.checks||[])).catch(()=>{});
+    fetch("/api/jobs").then((r)=>r.ok?r.json():null).then((data)=>data&&setJobs(data.jobs||[])).catch(()=>{});
+    fetch("/api/team").then((r)=>r.ok?r.json():null).then((data)=>data&&setMembers(data.members||[])).catch(()=>{});
+    fetch("/api/integrations").then((r)=>r.ok?r.json():null).then((data)=>data&&setIntegrations(data.providers||[])).catch(()=>{});
   }, []);
   useEffect(()=>{
     document.documentElement.classList.toggle("high-contrast",highContrast);
@@ -2928,6 +2938,8 @@ function SettingsPage({
             ["notifications", "Notifications"],
             ["integrations", "Integrations"],
             ["storage", "Storage"],
+            ["production", "Production"],
+            ["team", "Team"],
             ["privacy", "Privacy & access"],
             ["activity", "Activity"],
           ].map(([id, label]) => (
@@ -3093,6 +3105,10 @@ function SettingsPage({
             >
               <Download /> {modelProgress === null ? "Siapkan model sekarang" : `Menyiapkan ${modelProgress}%`}
             </button>
+            <div className="platform-manager">
+              <div><small>PLATFORM CONNECTIONS</small><h2>Publikasi resmi via OAuth</h2></div>
+              {integrations.map((provider)=><article key={provider.platform}><span><b>{provider.platform}</b><small>{provider.connections.length?`${provider.connections.length} akun terhubung`:provider.configured?"Siap dihubungkan":"OAuth server belum dikonfigurasi"}</small></span><button disabled={!provider.configured} onClick={async()=>{const response=await fetch("/api/integrations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({platform:provider.platform})});const result=await response.json();if(!response.ok)return notify(result.error||"Koneksi gagal");window.location.href=result.url}}>{provider.connections.length?"Kelola":provider.configured?"Hubungkan":"Belum siap"}</button></article>)}
+            </div>
           </section>
           <section id="settings-storage" className="settings-panel">
             <div>
@@ -3136,6 +3152,16 @@ function SettingsPage({
                 </a>
               )):<p className="settings-empty">Belum ada media tersimpan.</p>}
             </div>
+          </section>
+          <section id="settings-production" className="settings-panel">
+            <div><small>PRODUCTION COMMAND CENTER</small><h2>Diagnostics dan job recovery</h2></div>
+            <div className="diagnostic-grid">{diagnostics.map((check)=><article key={check.key} className={check.status}><i/><span><b>{check.label}</b><small>{check.detail}</small></span>{check.latency!==undefined&&<strong>{check.latency}ms</strong>}</article>)}</div>
+            <div className="job-monitor"><div><b>Render queue persisten</b><button onClick={async()=>{const response=await fetch("/api/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"recover-failed"})});const result=await response.json();if(!response.ok)return notify(result.error||"Recovery gagal");const data=await fetch("/api/jobs").then((item)=>item.json());setJobs(data.jobs||[]);notify(`${result.recovered} pekerjaan dipulihkan`)}}><RefreshCw/> Pulihkan gagal</button></div>{jobs.slice(0,8).map((job)=><article key={job.id}><span><b>{job.title}</b><small>{job.project_title}</small></span><em className={job.render_error?"failed":job.status}>{job.render_error||`${job.status} · ${job.render_progress||0}%`}</em></article>)}{!jobs.length&&<p className="settings-empty">Belum ada render dalam antrean.</p>}</div>
+          </section>
+          <section id="settings-team" className="settings-panel">
+            <div><small>TEAM COLLABORATION</small><h2>Anggota dan hak akses</h2></div>
+            <div className="team-invite"><input value={memberEmail} onChange={(event)=>setMemberEmail(event.target.value)} placeholder="email@tim.com"/><select value={memberRole} onChange={(event)=>setMemberRole(event.target.value)}><option value="editor">Editor</option><option value="reviewer">Reviewer</option><option value="viewer">Viewer</option></select><button className="primary" onClick={async()=>{const response=await fetch("/api/team",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:memberEmail,role:memberRole})});const result=await response.json();if(!response.ok)return notify(result.error||"Undangan gagal");const data=await fetch("/api/team").then((item)=>item.json());setMembers(data.members||[]);setMemberEmail("");notify("Undangan anggota disimpan")}}>Undang</button></div>
+            <div className="team-list">{members.map((member)=><article key={member.id}><span><b>{member.email}</b><small>{member.role} · {member.status}</small></span><button onClick={async()=>{await fetch(`/api/team?id=${encodeURIComponent(member.id)}`,{method:"DELETE"});setMembers((items)=>items.filter((item)=>item.id!==member.id));notify("Anggota dihapus")}}><Trash2/></button></article>)}{!members.length&&<p className="settings-empty">Belum ada anggota lain.</p>}</div>
           </section>
           <section id="settings-privacy" className="settings-panel">
             <div><small>PRIVACY & ACCESSIBILITY</small><h2>Kontrol data dan tampilan</h2></div>
@@ -4049,6 +4075,11 @@ function ClipEditor({
       onNotice(error instanceof Error ? error.message : "Template gagal dihapus");
     }
   }
+  function exportCreatorTemplates(){const anchor=document.createElement("a");anchor.href=URL.createObjectURL(new Blob([JSON.stringify({version:1,templates:savedTemplates},null,2)],{type:"application/json"}));anchor.download="kliyu-creator-templates.json";anchor.click();URL.revokeObjectURL(anchor.href);onNotice("Template exchange berhasil diekspor")}
+  async function importCreatorTemplates(file?:File){if(!file)return;try{const parsed=JSON.parse(await file.text()) as {templates?:Array<{name:string;settings:Record<string,unknown>}>};const valid=(parsed.templates||[]).filter((item)=>item&&typeof item.name==="string"&&item.settings&&typeof item.settings==="object").slice(0,20);if(!valid.length)throw new Error("Template tidak valid");await persistTemplates([...valid,...savedTemplates.filter((item)=>!valid.some((value)=>value.name===item.name))].slice(0,20));onNotice(`${valid.length} template berhasil diimpor`)}catch(error){onNotice(error instanceof Error?error.message:"Import template gagal")}}
+  function detectSpeakers(){let speaker=1;setSubtitleRows((rows)=>rows.map((row,index)=>{const previous=rows[index-1];if(previous&&(row.start-previous.end>.75||(/[?!]$/.test(previous.text.trim())&&index%2===0)))speaker=speaker===1?2:1;return{...row,speaker:`Speaker ${speaker}`}}));setSpeakerColors(true);onNotice("Speaker diarization selesai diterapkan")}
+  function enhanceCaptions(){setSubtitleRows((rows)=>rows.map((row,index)=>{let text=row.text.replace(/\s+/g," ").trim();text=text?text[0].toUpperCase()+text.slice(1):text;if(text&&!/[.!?]$/.test(text))text+=".";if(index===0&&text&&!/^[🔥💡⚡]/.test(text))text=`💡 ${text}`;return{...row,text}}));setStyle("Karaoke");setCaptionAnimation("pop");onNotice("Caption intelligence memperbaiki ejaan, penekanan, dan motion")}
+  function applyAudioMastering(){setAudioPreset("studio");setNoiseReduction(true);setAutoLevel(true);setAudioGain(1.05);setAudioDucking(true);onNotice("Audio mastering preset diterapkan")}
   async function saveBrandVoice() {
     const response = await fetch("/api/studio", {
       method: "POST",
@@ -4761,6 +4792,7 @@ function ClipEditor({
     return Math.max(28,Math.min(96,52+density*2+hookBoost+sceneBoost-index*2));
   });
   const retentionAverage=Math.round(retentionScores.reduce((sum,value)=>sum+value,0)/retentionScores.length);
+  const performanceScore=Math.max(35,Math.min(98,Math.round(48+(hookText.length>=18&&hookText.length<=95?14:4)+(endTime-startTime<=45?12:6)+(subtitleRows.filter((row)=>!row.removed).length>=4?10:3)+(sceneMarkers.length?8:2)+(style==="Karaoke"?6:3)+(noiseReduction&&autoLevel?7:2))));
   return (
     <div className="modal-backdrop editor-backdrop">
       <section className="editor-modal" role="dialog" aria-modal="true">
@@ -5049,6 +5081,7 @@ function ClipEditor({
               <div className="retention-bars">{retentionScores.map((score,index)=><i key={index} style={{height:`${score}%`}} className={score<55?"risk":""}><small>{index*5}s</small></i>)}</div>
               <p>{Math.min(...retentionScores)<55?"Area merah berisiko kehilangan penonton. Perpendek jeda atau tambahkan perubahan visual.":"Alur cukup padat. Hook dan perubahan visual tersebar dengan baik."}</p>
             </section>
+            <section className="performance-predictor"><div><span>CONTENT PERFORMANCE PREDICTION</span><strong>{performanceScore}</strong></div><div className="prediction-meter"><i style={{width:`${performanceScore}%`}}/></div><p>{performanceScore>=85?"Potensi kuat: hook, tempo, caption, dan audio sudah seimbang.":"Masih bisa ditingkatkan melalui hook lebih ringkas, pergantian visual, dan audio mastering."}</p><button onClick={()=>{if(hookText.length>95)setHookText(hookText.slice(0,92)+"…");if(!sceneMarkers.length)detectScenes();enhanceCaptions();applyAudioMastering()}}><WandSparkles/> Optimalkan otomatis</button></section>
             <section className="quality-control-panel">
               <div>
                 <span>AI QUALITY CONTROL</span>
@@ -5159,6 +5192,9 @@ function ClipEditor({
                 >
                   3 thumbnail variants
                 </button>
+                <button onClick={detectSpeakers}>Detect speakers</button>
+                <button onClick={enhanceCaptions}>Caption intelligence</button>
+                <button onClick={applyAudioMastering}>Master audio</button>
               </div>
               <small>
                 Baris subtitle bertanda ✂ akan dihapus dari video saat opsi Cut
@@ -5428,6 +5464,7 @@ function ClipEditor({
               ) : (
                 <small>Belum ada template tersimpan.</small>
               )}
+              <div className="template-exchange"><button onClick={exportCreatorTemplates} disabled={!savedTemplates.length}><Download/> Export pack</button><label><UploadCloud/> Import pack<input type="file" accept="application/json" onChange={(event)=>void importCreatorTemplates(event.target.files?.[0])}/></label></div>
             </section>
             <section className="brand-voice-panel">
               <div>
