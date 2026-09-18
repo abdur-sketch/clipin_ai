@@ -292,6 +292,8 @@ export default function Home() {
     revenue: 0,
   });
   const [profileOpen, setProfileOpen] = useState(false);
+  const [commandOpen,setCommandOpen]=useState(false);
+  const [commandQuery,setCommandQuery]=useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -299,6 +301,14 @@ export default function Home() {
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(()=>{
+    const handler=(event:KeyboardEvent)=>{
+      if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCommandOpen((value)=>!value)}
+      if(event.key==="Escape")setCommandOpen(false);
+    };
+    window.addEventListener("keydown",handler);return()=>window.removeEventListener("keydown",handler);
+  },[]);
 
   useEffect(() => {
     fetch("/api/account")
@@ -596,6 +606,7 @@ export default function Home() {
     source?: File | string,
     projectName?: string,
     preferences: AnalysisPreferences = {},
+    deferNavigation = false,
   ) {
     setUploadError("");
     setProgress(8);
@@ -747,6 +758,7 @@ export default function Home() {
       }
       await loadProjects();
       setProgress(100);
+      if (deferNavigation) return;
       window.setTimeout(() => {
         setProcessing(false);
         setUploadOpen(false);
@@ -759,7 +771,18 @@ export default function Home() {
       setProcessing(false);
       setUploadError(message);
       setToast(message);
+      if (deferNavigation) throw error;
     }
+  }
+  async function startBatchUpload(files: File[],preferences: AnalysisPreferences){
+    setProcessing(true);setUploadError("");
+    try{
+      for(let index=0;index<files.length;index++){
+        setToast(`Memproses video ${index+1} dari ${files.length}`);
+        await startUpload(files[index],files[index].name.replace(/\.[^.]+$/, ""),preferences,true);
+      }
+      await loadProjects();setProcessing(false);setUploadOpen(false);setView("projects");setToast(`${files.length} project berhasil dibuat`);
+    }catch{setProcessing(false)}
   }
   function go(next: View) {
     setView(next);
@@ -1092,6 +1115,7 @@ export default function Home() {
             }
           </div>
           <div className="top-actions">
+            <button className="command-trigger" onClick={()=>setCommandOpen(true)}><Search/> Cari <kbd>⌘K</kbd></button>
             <button
               className="icon-button"
               aria-label="Bantuan"
@@ -1245,7 +1269,23 @@ export default function Home() {
           error={uploadError}
           onClose={() => !processing && setUploadOpen(false)}
           onStart={startUpload}
+          onBatchStart={startBatchUpload}
           inputRef={inputRef}
+        />
+      )}
+      {commandOpen && (
+        <CommandPalette
+          query={commandQuery}
+          setQuery={setCommandQuery}
+          onClose={() => setCommandOpen(false)}
+          commands={[
+            { label: "Buat project baru", hint: "Upload atau link", action: () => setUploadOpen(true) },
+            { label: "Buka semua project", hint: "Library", action: () => go("projects") },
+            { label: "Buka AI Clips", hint: `${clipItems.length} klip`, action: () => go("clips") },
+            { label: "Buka Studio", hint: "Edit klip terbaik", action: () => clipItems[0] ? setEditor(clipItems[0]) : setToast("Belum ada klip") },
+            { label: "Lihat Analytics", hint: "Performa konten", action: () => go("analytics") },
+            { label: "Pengaturan workspace", hint: "Backup, storage, akses", action: () => go("settings") },
+          ]}
         />
       )}
       {preview && (
@@ -1386,6 +1426,14 @@ function Dashboard({
           </div>
         </div>
       </div>
+      <section className="launchpad">
+        <div><span className="modal-kicker">CREATOR LAUNCHPAD</span><h2>{projects.length&&clips.length?"Workspace siap berkembang":"Selesaikan setup pertama Anda"}</h2><p>{[projects.length>0,clips.length>0,business.published>0].filter(Boolean).length} dari 3 tahap selesai</p></div>
+        <div className="launchpad-steps">
+          <button className={projects.length?"done":""} onClick={onUpload}><i>{projects.length?<Check/>:"1"}</i><span><b>Masukkan video</b><small>Upload satu atau batch</small></span></button>
+          <button className={clips.length?"done":""} onClick={onClips}><i>{clips.length?<Check/>:"2"}</i><span><b>Pilih klip terbaik</b><small>Review skor dan duplikat</small></span></button>
+          <button className={business.published?"done":""} onClick={onClips}><i>{business.published?<Check/>:"3"}</i><span><b>Render & publikasikan</b><small>Siapkan file final</small></span></button>
+        </div>
+      </section>
       <button className="upload-zone" onClick={onUpload}>
         <div className="upload-visual">
           <span>
@@ -2139,6 +2187,7 @@ function ProjectsPage({
   const [searchQuery,setSearchQuery]=useState("");
   const [searchResults,setSearchResults]=useState<Array<{project_id:string;project_title:string;clip_id?:string;title:string;hook:string;score:number;kind:string}>>([]);
   const [searching,setSearching]=useState(false);
+  const [collection,setCollection]=useState<"all"|"complete"|"attention"|"recent">("all");
   const failedProjects = projects.filter((project) => project.status === "failed");
   const emptyProjects = projects.filter(
     (project) => project.status === "complete" && !project.clip_count,
@@ -2157,6 +2206,10 @@ function ProjectsPage({
         ),
       )
     : 100;
+  const displayedProjects=useMemo(()=>{
+    const selected=collection==="complete"?projects.filter((project)=>project.status==="complete"&&Boolean(project.clip_count)):collection==="attention"?projects.filter((project)=>project.status==="failed"||!project.clip_count):[...projects];
+    return collection==="recent"?selected.sort((a,b)=>Number(b.updated_at||0)-Number(a.updated_at||0)).slice(0,5):selected;
+  },[collection,projects]);
   async function renameProject(project: ProjectSummary) {
     const title = window.prompt("Nama project baru", project.title)?.trim();
     if (!title || title === project.title) return;
@@ -2217,6 +2270,7 @@ function ProjectsPage({
         <label><Search/><input value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} placeholder="Cari judul, hook, caption, atau isi transkrip…"/><span>{searching?"Mencari…":"AI SEARCH"}</span></label>
         {searchQuery.trim().length>=2&&searchResults.length>0&&<div>{searchResults.map((result,index)=><button key={`${result.kind}-${result.clip_id||result.project_id}-${index}`} onClick={()=>onOpen(result.project_id)}><span><b>{result.title}</b><small>{result.project_title} · {result.kind==="transcript"?"Transkrip":"Klip"}</small></span>{result.score>0&&<strong>{result.score}</strong>}</button>)}</div>}
       </section>
+      <div className="smart-collections" aria-label="Koleksi pintar"><span>SMART COLLECTIONS</span>{([['all','Semua',projects.length],['complete','Siap pakai',projects.filter((p)=>p.status==='complete'&&p.clip_count).length],['attention','Perlu perhatian',failedProjects.length+emptyProjects.length],['recent','Terbaru',Math.min(5,projects.length)]] as const).map(([id,label,count])=><button key={id} className={collection===id?'active':''} onClick={()=>setCollection(id)}>{label} <b>{count}</b></button>)}</div>
       <section className={`project-health-center ${healthScore >= 90 ? "healthy" : "attention"}`}>
         <div className="health-score">
           <strong>{healthScore}</strong>
@@ -2254,7 +2308,7 @@ function ProjectsPage({
             <span>PROGRESS</span>
             <span />
           </div>
-          {projects.map((project, index) => (
+          {displayedProjects.map((project, index) => (
             <div
               className="table-row"
               key={project.id}
@@ -2776,6 +2830,7 @@ function SettingsPage({
   }>({ groups: [], assets: [], totalFiles: 0, totalBytes: 0 });
   const [activities,setActivities]=useState<Array<{id:string;title:string;message:string;status:string;created_at:number}>>([]);
   const [backups,setBackups]=useState<Array<{id:string;created_at:number;bytes:number}>>([]);
+  const [deviceStorage,setDeviceStorage]=useState<{usage:number;quota:number}>({usage:0,quota:0});
   function jump(id: string) {
     setActive(id);
     document
@@ -2844,6 +2899,7 @@ function SettingsPage({
       .catch(() => {});
     fetch("/api/activity").then((r)=>r.ok?r.json():null).then((data)=>data&&setActivities(data.activities||[])).catch(()=>{});
     fetch("/api/backup").then((r)=>r.ok?r.json():null).then((data)=>data&&setBackups(data.backups||[])).catch(()=>{});
+    navigator.storage?.estimate().then((estimate)=>setDeviceStorage({usage:Number(estimate.usage||0),quota:Number(estimate.quota||0)})).catch(()=>{});
   }, []);
   useEffect(()=>{
     document.documentElement.classList.toggle("high-contrast",highContrast);
@@ -2982,6 +3038,7 @@ function SettingsPage({
                 ["mp4Export", "Browser Video Export"],
                 ["cloudRender", "Cloud Render Worker"],
                 ["socialPublishing", "OAuth Social Publisher"],
+                ["youtubeWatch", "YouTube Channel Watch"],
               ].map(([key, label]) => (
                 <div key={key}>
                   <span>
@@ -3048,6 +3105,7 @@ function SettingsPage({
               </strong>
               <span>{storage.totalFiles} file tersimpan</span>
             </div>
+            {deviceStorage.quota>0&&<div className="device-capacity"><span><b>Kapasitas kerja browser</b><small>{(deviceStorage.usage/1024/1024).toFixed(0)} MB dari {(deviceStorage.quota/1024/1024/1024).toFixed(1)} GB digunakan</small></span><i><b style={{width:`${Math.min(100,deviceStorage.usage/deviceStorage.quota*100)}%`}}/></i></div>}
             <div className="storage-groups">
               {storage.groups.map((group) => (
                 <div key={group.name}>
@@ -3090,6 +3148,7 @@ function SettingsPage({
             <div className="backup-actions">
               <button className="primary" onClick={async()=>{const r=await fetch("/api/backup",{method:"POST"});if(!r.ok)return notify("Backup gagal dibuat");const data=await fetch("/api/backup").then(x=>x.json());setBackups(data.backups||[]);notify("Backup workspace berhasil dibuat")}}>Buat backup sekarang</button>
               <a className="outline-button" href="/api/backup?download=1"><Download/> Unduh data saya</a>
+              <button className="outline-button" onClick={async()=>{const response=await fetch("/api/storage?mode=retention",{method:"DELETE"});const result=await response.json();if(!response.ok)return notify(result.error||"Retensi gagal");const refreshed=await fetch("/api/storage").then((item)=>item.json());setStorage(refreshed);notify(`${result.removed} file melewati masa retensi dihapus`)}}><Trash2/> Jalankan retensi</button>
             </div>
             {backups[0]&&<p className="backup-note">Backup terakhir {new Date(backups[0].created_at).toLocaleString("id-ID")} · {(backups[0].bytes/1024).toFixed(1)} KB</p>}
           </section>
@@ -3105,12 +3164,18 @@ function SettingsPage({
   );
 }
 
+function CommandPalette({query,setQuery,onClose,commands}:{query:string;setQuery:(value:string)=>void;onClose:()=>void;commands:Array<{label:string;hint:string;action:()=>void}>}){
+  const visible=commands.filter((command)=>`${command.label} ${command.hint}`.toLowerCase().includes(query.toLowerCase()));
+  return <div className="modal-backdrop command-backdrop" onMouseDown={(event)=>event.target===event.currentTarget&&onClose()}><section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette"><label><Search/><input autoFocus value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Cari tindakan…"/><kbd>ESC</kbd></label><div>{visible.map((command)=><button key={command.label} onClick={()=>{command.action();onClose();setQuery("")}}><b>{command.label}</b><span>{command.hint}</span><kbd>↵</kbd></button>)}{!visible.length&&<p>Tindakan tidak ditemukan.</p>}</div><small>Tip: tekan ⌘K atau Ctrl+K dari halaman mana pun.</small></section></div>
+}
+
 function UploadModal({
   processing,
   progress,
   error,
   onClose,
   onStart,
+  onBatchStart,
   inputRef,
 }: {
   processing: boolean;
@@ -3122,6 +3187,7 @@ function UploadModal({
     projectName?: string,
     preferences?: AnalysisPreferences,
   ) => void;
+  onBatchStart: (files:File[],preferences:AnalysisPreferences)=>Promise<void>;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const [sourceMode, setSourceMode] = useState<"file" | "link">("file");
@@ -3270,9 +3336,10 @@ function UploadModal({
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => {
                     event.preventDefault();
-                    const file = event.dataTransfer.files[0];
-                    if (file)
-                      onStart(file, projectName, {
+                    const files = Array.from(event.dataTransfer.files).filter((file)=>file.type.startsWith("video/"));
+                    if (files.length>1) void onBatchStart(files,{targetDuration,contentStyle});
+                    else if (files[0])
+                      onStart(files[0], projectName, {
                         targetDuration,
                         contentStyle,
                       });
@@ -3281,18 +3348,20 @@ function UploadModal({
                   <span>
                     <UploadCloud />
                   </span>
-                  <strong>Pilih atau drop video asli</strong>
-                  <small>MP4 atau MOV · diproses privat dengan Browser AI</small>
+                  <strong>Pilih satu atau beberapa video</strong>
+                  <small>Batch MP4/MOV · setiap file menjadi satu project</small>
                 </button>
                 <input
                   ref={inputRef}
                   type="file"
                   accept="video/mp4,video/quicktime"
+                  multiple
                   hidden
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file)
-                      onStart(file, projectName, {
+                    const files = Array.from(event.target.files||[]);
+                    if(files.length>1) void onBatchStart(files,{targetDuration,contentStyle});
+                    else if (files[0])
+                      onStart(files[0], projectName, {
                         targetDuration,
                         contentStyle,
                       });

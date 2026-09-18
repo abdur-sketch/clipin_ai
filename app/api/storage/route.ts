@@ -49,12 +49,18 @@ export async function DELETE(request: Request) {
   if (guarded) return guarded;
   const user = await currentUser();
   const exports = await bindings.MEDIA.list({ prefix: `exports/${user.id}/` });
-  if (exports.objects.length)
-    await bindings.MEDIA.delete(exports.objects.map((item) => item.key));
-  await bindings.DB.prepare(
-    "UPDATE clips SET rendered_key=NULL,status='ready',render_progress=0 WHERE id IN (SELECT clips.id FROM clips JOIN projects ON projects.id=clips.project_id WHERE projects.user_id=?)",
-  )
-    .bind(user.id)
-    .run();
-  return Response.json({ ok: true, removed: exports.objects.length });
+  const mode=new URL(request.url).searchParams.get("mode");
+  let targets=exports.objects;
+  if(mode==="retention"){
+    const settings=await bindings.DB.prepare("SELECT retention_days FROM user_settings WHERE user_id=?").bind(user.id).first<{retention_days:number}>();
+    const cutoff=Date.now()-Number(settings?.retention_days||30)*86400000;
+    targets=exports.objects.filter((item)=>new Date(item.uploaded).getTime()<cutoff);
+  }
+  if (targets.length) await bindings.MEDIA.delete(targets.map((item) => item.key));
+  if(targets.length){
+    const statements=targets.map((item)=>bindings.DB.prepare("UPDATE clips SET rendered_key=NULL,status='ready',render_progress=0 WHERE rendered_key=? AND id IN (SELECT clips.id FROM clips JOIN projects ON projects.id=clips.project_id WHERE projects.user_id=?)").bind(item.key,user.id));
+    statements.push(bindings.DB.prepare("INSERT INTO activity_logs (id,user_id,type,title,message,status,metadata,created_at) VALUES (?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.id,"storage",mode==="retention"?"Retensi data dijalankan":"Hasil render dibersihkan",`${targets.length} file dihapus`,"success","{}",Date.now()));
+    await bindings.DB.batch(statements);
+  }
+  return Response.json({ ok: true, removed: targets.length, mode:mode||"all" });
 }

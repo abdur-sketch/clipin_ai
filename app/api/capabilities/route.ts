@@ -12,6 +12,7 @@ export async function GET() {
     mp4Export: true,
     cloudRender: Boolean(bindings.RENDER_SERVICE_URL && bindings.RENDER_SERVICE_TOKEN),
     socialPublishing: Boolean(bindings.PUBLISH_SERVICE_URL && bindings.PUBLISH_SERVICE_TOKEN),
+    youtubeWatch: Boolean(bindings.YOUTUBE_API_KEY),
     billing: Boolean(bindings.BILLING_SERVICE_URL),
     storage: Boolean(bindings.MEDIA),
     database: firebase.connected || Boolean(bindings.DB),

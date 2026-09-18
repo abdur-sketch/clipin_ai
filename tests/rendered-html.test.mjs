@@ -538,7 +538,7 @@ test("reliability suite includes resumable uploads, semantic search, duplicate d
     source("db/schema.ts"),
     source("drizzle/0017_soft_drax.sql"),
   ]);
-  for (const feature of ["AI SEARCH", "kemiripan terdeteksi", "AI RETENTION MAP", "MEDIA LIBRARY", "ACTIVITY CENTER", "PRIVACY & ACCESSIBILITY"])
+  for (const feature of ["AI SEARCH", "kemiripan terdeteksi", "AI RETENTION MAP", "MEDIA LIBRARY", "ACTIVITY CENTER", "PRIVACY & ACCESSIBILITY", "CREATOR LAUNCHPAD", "SMART COLLECTIONS", "Command palette", "onBatchStart", "Jalankan retensi"])
     assert.ok(page.includes(feature), `missing ${feature}`);
   assert.match(resumable, /createMultipartUpload/);
   assert.match(search, /transcripts\.text LIKE/);
