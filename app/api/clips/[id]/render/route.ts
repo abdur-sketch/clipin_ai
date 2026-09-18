@@ -7,11 +7,21 @@ export async function GET(
   const user = await currentUser(),
     { id } = await params;
   const clip = await bindings.DB.prepare(
-    "SELECT clips.status,clips.render_job_id,clips.render_progress,clips.render_error FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
+    "SELECT clips.status,clips.title,clips.rendered_key,clips.render_job_id,clips.render_progress,clips.render_error FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?",
   )
     .bind(id, user.id)
     .first<Record<string, unknown>>();
   if (!clip) return jsonError("Clip tidak ditemukan", 404);
+  if(clip.status==="rendering"&&clip.render_job_id&&bindings.RENDER_SERVICE_URL){
+    const statusResponse=await fetch(`${bindings.RENDER_SERVICE_URL.replace(/\/$/,"")}/jobs/${encodeURIComponent(String(clip.render_job_id))}`,{headers:bindings.RENDER_SERVICE_TOKEN?{authorization:`Bearer ${bindings.RENDER_SERVICE_TOKEN}`}:{}}).catch(()=>null);
+    if(statusResponse?.ok){
+      const job=await statusResponse.json() as {status?:string;progress?:number;downloadUrl?:string;error?:string};
+      if(job.status==="failed")await bindings.DB.prepare("UPDATE clips SET status='ready',render_error=?,render_progress=0,updated_at=? WHERE id=?").bind(String(job.error||"Cloud render gagal").slice(0,1000),Date.now(),id).run();
+      else if(job.status==="completed"&&job.downloadUrl){
+        const rendered=await fetch(job.downloadUrl);if(rendered.ok&&rendered.body){const key=`exports/${user.id}/${id}.mp4`;await bindings.MEDIA.put(key,rendered.body,{httpMetadata:{contentType:rendered.headers.get("content-type")||"video/mp4"}});await bindings.DB.prepare("UPDATE clips SET status='rendered',rendered_key=?,render_progress=100,render_error=NULL,updated_at=? WHERE id=?").bind(key,Date.now(),id).run();clip.status="rendered";clip.render_progress=100}
+      } else if(job.progress!==undefined){await bindings.DB.prepare("UPDATE clips SET render_progress=?,updated_at=? WHERE id=?").bind(Math.max(1,Math.min(99,Number(job.progress))),Date.now(),id).run();clip.render_progress=job.progress}
+    }
+  }
   return Response.json({
     status: clip.status,
     progress: Number(clip.render_progress || 0),
@@ -173,7 +183,8 @@ export async function POST(
       downloadUrl: `/api/clips/${id}/download`,
     });
   }
-  const result = (await response.json()) as { downloadUrl?: string };
+  const result = (await response.json()) as { downloadUrl?: string;jobId?:string;status?:string };
+  if(result.jobId){await bindings.DB.prepare("UPDATE clips SET status='rendering',render_job_id=?,render_progress=2,updated_at=? WHERE id=?").bind(result.jobId,Date.now(),id).run();return Response.json({ok:true,status:"rendering",jobId:result.jobId},{status:202})}
   if (!result.downloadUrl) {
     await bindings.DB.prepare(
       "UPDATE clips SET status='ready',updated_at=? WHERE id=?",

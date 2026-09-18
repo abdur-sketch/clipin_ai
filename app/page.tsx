@@ -580,15 +580,17 @@ export default function Home() {
   );
 
   async function uploadResumable(projectId: string, file: File) {
-    const started = await fetch(`/api/projects/${projectId}/resumable`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ filename: file.name, contentType: file.type || "video/mp4", size: file.size }),
-    });
-    if (!started.ok) throw new Error((await started.json()).error || "Sesi upload gagal dibuat");
-    const { sessionId, chunkSize } = await started.json() as { sessionId:string; chunkSize:number };
-    const parts: Array<{partNumber:number;etag:string}> = [];
+    const recovery=await fetch(`/api/projects/${projectId}/resumable?filename=${encodeURIComponent(file.name)}&size=${file.size}`).then((response)=>response.ok?response.json():null) as {session?:{sessionId:string;chunkSize:number;parts:Array<{partNumber:number;etag:string}>}}|null;
+    let sessionId=recovery?.session?.sessionId||"",chunkSize=recovery?.session?.chunkSize||8*1024*1024;
+    const parts:Array<{partNumber:number;etag:string}>=[...(recovery?.session?.parts||[])];
+    if(!sessionId){
+      const started = await fetch(`/api/projects/${projectId}/resumable`, {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type||"video/mp4",size:file.size})});
+      if (!started.ok) throw new Error((await started.json()).error || "Sesi upload gagal dibuat");
+      const created=await started.json() as {sessionId:string;chunkSize:number};sessionId=created.sessionId;chunkSize=created.chunkSize;
+    } else setToast(`Melanjutkan upload ${parts.length} bagian yang sudah tersimpan`);
     try {
       for (let offset=0, partNumber=1; offset<file.size; offset+=chunkSize, partNumber++) {
+        if(parts.some((item)=>item.partNumber===partNumber)){setProgress(22+Math.round(Math.min(file.size,offset+chunkSize)/file.size*28));continue}
         const response = await fetch(`/api/projects/${projectId}/resumable?sessionId=${encodeURIComponent(sessionId)}&partNumber=${partNumber}`, { method:"PUT", headers:{"content-type":"application/octet-stream"}, body:file.slice(offset,Math.min(file.size,offset+chunkSize)) });
         if(!response.ok) throw new Error((await response.json()).error || `Upload bagian ${partNumber} gagal`);
         parts.push(await response.json());
@@ -621,23 +623,14 @@ export default function Home() {
         projectName?.trim() ||
         file?.name.replace(/\.[^.]+$/, "") ||
         (sourceUrl ? `Video dari ${sourceHost}` : "Project video baru");
-      const created = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title,
-          filename: file?.name,
-          contentType: file?.type,
-          sourceUrl,
-          targetDuration: preferences.targetDuration || 30,
-          contentStyle: preferences.contentStyle || "viral",
-        }),
-      });
-      if (!created.ok)
-        throw new Error(
-          (await created.json()).error || "Gagal membuat project",
-        );
-      const { project } = (await created.json()) as { project: { id: string } };
+      const recoverable=file&&file.size>12*1024*1024?await fetch(`/api/uploads?filename=${encodeURIComponent(file.name)}&size=${file.size}`).then((response)=>response.ok?response.json():null) as {session?:{project_id:string}}|null:null;
+      let project:{id:string};
+      if(recoverable?.session?.project_id){project={id:String(recoverable.session.project_id)};setToast("Sesi upload lama ditemukan dan akan dilanjutkan")}
+      else {
+        const created = await fetch("/api/projects", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({title,filename:file?.name,contentType:file?.type,sourceUrl,targetDuration:preferences.targetDuration||30,contentStyle:preferences.contentStyle||"viral"})});
+        if (!created.ok) throw new Error((await created.json()).error || "Gagal membuat project");
+        ({project}=await created.json() as {project:{id:string}});
+      }
       setProgress(22);
       if (file) {
         if (file.size > 12 * 1024 * 1024) await uploadResumable(project.id, file);
@@ -807,6 +800,25 @@ export default function Home() {
           throw new Error(
             "Untuk export video YouTube, unggah file video asli agar browser dapat mengakses frame dan audio.",
           );
+        const nativeMp4=typeof MediaRecorder!=="undefined"&&MediaRecorder.isTypeSupported("video/mp4;codecs=avc1.42E01E,mp4a.40.2");
+        if(!nativeMp4){
+          const cloud=await fetch(`/api/clips/${clip.id}/render`,{method:"POST",signal:controller.signal});
+          if(cloud.ok){
+            let completed=false;
+            for(let attempt=0;attempt<180&&!completed;attempt++){
+              await new Promise((resolve)=>window.setTimeout(resolve,2000));
+              const status=await fetch(`/api/clips/${clip.id}/render`,{signal:controller.signal});const job=await status.json() as {status?:string;progress?:number;error?:string};
+              setRenderProgress((items)=>({...items,[renderId]:Number(job.progress||2)}));
+              if(job.status==="rendered")completed=true;
+              if(job.error)throw new Error(job.error);
+            }
+            if(!completed)throw new Error("Cloud render masih berjalan. Pantau melalui Production Command Center.");
+            setClipItems((items)=>items.map((item)=>item.id===clip.id?{...item,status:"rendered"}:item));setRenderProgress((items)=>({...items,[renderId]:100}));return;
+          }
+          const failure=await cloud.json().catch(()=>({})) as {error?:string};
+          if(cloud.status!==503)throw new Error(failure.error||"Cloud render gagal");
+          setToast("Encoder MP4 cloud belum aktif; menggunakan WebM browser yang kompatibel");
+        }
         const blob = await renderVideoInBrowser(
           {
             ...clip,
@@ -2821,6 +2833,7 @@ function SettingsPage({
   const [active, setActive] = useState("account");
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [deviceAi] = useState(() => browserAiReadiness());
+  const [nativeMp4] = useState(()=>typeof MediaRecorder!=="undefined"&&MediaRecorder.isTypeSupported("video/mp4;codecs=avc1.42E01E,mp4a.40.2"));
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const [storage, setStorage] = useState<{
     groups: Array<{ name: string; files: number; bytes: number }>;
@@ -2834,8 +2847,10 @@ function SettingsPage({
   const [diagnostics,setDiagnostics]=useState<Array<{key:string;label:string;status:string;detail:string;latency?:number}>>([]);
   const [jobs,setJobs]=useState<Array<{id:string;title:string;project_title:string;status:string;render_progress:number;render_error?:string}>>([]);
   const [members,setMembers]=useState<Array<{id:string;email:string;role:string;status:string}>>([]);
+  const [teamInvites,setTeamInvites]=useState<Array<{id:string;role:string;owner_name:string;expires_at:number}>>([]);
   const [memberEmail,setMemberEmail]=useState("");
   const [memberRole,setMemberRole]=useState("reviewer");
+  const [teamEmailConfigured,setTeamEmailConfigured]=useState(false);
   const [integrations,setIntegrations]=useState<Array<{platform:string;configured:boolean;connections:unknown[]}>>([]);
   function jump(id: string) {
     setActive(id);
@@ -2908,7 +2923,7 @@ function SettingsPage({
     navigator.storage?.estimate().then((estimate)=>setDeviceStorage({usage:Number(estimate.usage||0),quota:Number(estimate.quota||0)})).catch(()=>{});
     fetch("/api/diagnostics").then((r)=>r.ok?r.json():null).then((data)=>data&&setDiagnostics(data.checks||[])).catch(()=>{});
     fetch("/api/jobs").then((r)=>r.ok?r.json():null).then((data)=>data&&setJobs(data.jobs||[])).catch(()=>{});
-    fetch("/api/team").then((r)=>r.ok?r.json():null).then((data)=>data&&setMembers(data.members||[])).catch(()=>{});
+    fetch("/api/team").then((r)=>r.ok?r.json():null).then((data)=>{if(data){setMembers(data.members||[]);setTeamInvites(data.invites||[]);setTeamEmailConfigured(Boolean(data.emailConfigured))}}).catch(()=>{});
     fetch("/api/integrations").then((r)=>r.ok?r.json():null).then((data)=>data&&setIntegrations(data.providers||[])).catch(()=>{});
   }, []);
   useEffect(()=>{
@@ -3086,6 +3101,7 @@ function SettingsPage({
                   </div>
                 );
               })}
+              <div><span><b>Native MP4 H.264/AAC</b><small>{nativeMp4?"Export langsung tersedia":"Cloud MP4 digunakan bila worker terhubung; WebM menjadi fallback"}</small></span><em className={nativeMp4?"connected":"missing"}>{nativeMp4?"READY":"FALLBACK"}</em></div>
             </div>
             <button
               className="outline-button browser-model-button"
@@ -3160,7 +3176,9 @@ function SettingsPage({
           </section>
           <section id="settings-team" className="settings-panel">
             <div><small>TEAM COLLABORATION</small><h2>Anggota dan hak akses</h2></div>
-            <div className="team-invite"><input value={memberEmail} onChange={(event)=>setMemberEmail(event.target.value)} placeholder="email@tim.com"/><select value={memberRole} onChange={(event)=>setMemberRole(event.target.value)}><option value="editor">Editor</option><option value="reviewer">Reviewer</option><option value="viewer">Viewer</option></select><button className="primary" onClick={async()=>{const response=await fetch("/api/team",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:memberEmail,role:memberRole})});const result=await response.json();if(!response.ok)return notify(result.error||"Undangan gagal");const data=await fetch("/api/team").then((item)=>item.json());setMembers(data.members||[]);setMemberEmail("");notify("Undangan anggota disimpan")}}>Undang</button></div>
+            <div className="team-invite"><input value={memberEmail} onChange={(event)=>setMemberEmail(event.target.value)} placeholder="email@tim.com"/><select value={memberRole} onChange={(event)=>setMemberRole(event.target.value)}><option value="editor">Editor</option><option value="reviewer">Reviewer</option><option value="viewer">Viewer</option></select><button className="primary" onClick={async()=>{const response=await fetch("/api/team",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:memberEmail,role:memberRole})});const result=await response.json();if(!response.ok)return notify(result.error||"Undangan gagal");const data=await fetch("/api/team").then((item)=>item.json());setMembers(data.members||[]);setMemberEmail("");notify(result.emailSent?"Email undangan berhasil dikirim":"Undangan disimpan; layanan email belum aktif")}}>Undang</button></div>
+            <p className="backup-note">{teamEmailConfigured?"Email invitation aktif.":"Invitation tersimpan aman, tetapi EMAIL_SERVICE belum dikonfigurasi."}</p>
+            {teamInvites.map((invite)=><div className="incoming-invite" key={invite.id}><span><b>Undangan dari {invite.owner_name}</b><small>Role {invite.role} · berlaku sampai {new Date(invite.expires_at).toLocaleDateString("id-ID")}</small></span><button onClick={async()=>{const response=await fetch("/api/team",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"accept",id:invite.id})});const result=await response.json();if(!response.ok)return notify(result.error||"Undangan gagal diterima");setTeamInvites((items)=>items.filter((item)=>item.id!==invite.id));notify("Undangan workspace diterima")}}>Terima</button></div>)}
             <div className="team-list">{members.map((member)=><article key={member.id}><span><b>{member.email}</b><small>{member.role} · {member.status}</small></span><button onClick={async()=>{await fetch(`/api/team?id=${encodeURIComponent(member.id)}`,{method:"DELETE"});setMembers((items)=>items.filter((item)=>item.id!==member.id));notify("Anggota dihapus")}}><Trash2/></button></article>)}{!members.length&&<p className="settings-empty">Belum ada anggota lain.</p>}</div>
           </section>
           <section id="settings-privacy" className="settings-panel">
@@ -3174,6 +3192,7 @@ function SettingsPage({
             <div className="backup-actions">
               <button className="primary" onClick={async()=>{const r=await fetch("/api/backup",{method:"POST"});if(!r.ok)return notify("Backup gagal dibuat");const data=await fetch("/api/backup").then(x=>x.json());setBackups(data.backups||[]);notify("Backup workspace berhasil dibuat")}}>Buat backup sekarang</button>
               <a className="outline-button" href="/api/backup?download=1"><Download/> Unduh data saya</a>
+              <label className="outline-button restore-backup"><UploadCloud/> Restore backup<input type="file" accept="application/json" onChange={async(event)=>{const file=event.target.files?.[0];if(!file)return;if(!window.confirm("Gabungkan data dari backup ini ke workspace?"))return;const response=await fetch("/api/backup",{method:"PUT",headers:{"content-type":"application/json"},body:await file.text()});const result=await response.json();if(!response.ok)return notify(result.error||"Restore gagal");notify(`${result.restored} record berhasil dipulihkan`)}}/></label>
               <button className="outline-button" onClick={async()=>{const response=await fetch("/api/storage?mode=retention",{method:"DELETE"});const result=await response.json();if(!response.ok)return notify(result.error||"Retensi gagal");const refreshed=await fetch("/api/storage").then((item)=>item.json());setStorage(refreshed);notify(`${result.removed} file melewati masa retensi dihapus`)}}><Trash2/> Jalankan retensi</button>
             </div>
             {backups[0]&&<p className="backup-note">Backup terakhir {new Date(backups[0].created_at).toLocaleString("id-ID")} · {(backups[0].bytes/1024).toFixed(1)} KB</p>}
@@ -3376,6 +3395,7 @@ function UploadModal({
                   </span>
                   <strong>Pilih satu atau beberapa video</strong>
                   <small>Batch MP4/MOV · setiap file menjadi satu project</small>
+                  <small>Jika upload terputus, pilih kembali file yang sama untuk melanjutkan.</small>
                 </button>
                 <input
                   ref={inputRef}

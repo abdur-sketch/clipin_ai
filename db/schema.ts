@@ -255,8 +255,18 @@ export const workspaceMembers = sqliteTable("workspace_members", {
   email: text("email").notNull(),
   role: text("role").notNull().default("reviewer"),
   status: text("status").notNull().default("invited"),
+  inviteToken: text("invite_token"),
+  expiresAt: integer("expires_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
+});
+
+export const oauthStates = sqliteTable("oauth_states", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  platform: text("platform").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
 });
 
 export const studioPreferences = sqliteTable("studio_preferences", {

@@ -10,6 +10,8 @@ type AppEnv = {
   YOUTUBE_API_KEY?: string;
   PUBLISH_SERVICE_URL?: string;
   PUBLISH_SERVICE_TOKEN?: string;
+  EMAIL_SERVICE_URL?: string;
+  EMAIL_SERVICE_TOKEN?: string;
   BILLING_SERVICE_URL?: string;
   BILLING_SERVICE_TOKEN?: string;
   FIREBASE_PROJECT_ID?: string;
@@ -77,6 +79,14 @@ export async function currentUser() {
     });
   return { id, email, name, authenticated: Boolean(signedIn) };
 }
+
+export type WorkspaceRole="owner"|"editor"|"reviewer"|"viewer";
+export async function workspaceRole(ownerId:string,user:{id:string;email:string}):Promise<WorkspaceRole|null>{
+  if(ownerId===user.id)return "owner";
+  const member=await bindings.DB.prepare("SELECT role FROM workspace_members WHERE owner_id=? AND email=? AND status='active' AND (expires_at IS NULL OR expires_at>?)").bind(ownerId,user.email.toLowerCase(),Date.now()).first<{role:string}>();
+  return member&&["editor","reviewer","viewer"].includes(member.role)?member.role as WorkspaceRole:null;
+}
+export function roleAllows(role:WorkspaceRole|null,required:"view"|"review"|"edit"){if(!role)return false;if(role==="owner"||role==="editor")return true;if(required==="view")return true;return required==="review"&&role==="reviewer"}
 
 export async function sha(value: string) {
   const bytes = await crypto.subtle.digest(

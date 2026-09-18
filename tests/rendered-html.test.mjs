@@ -568,3 +568,30 @@ test("production v33 adds diagnostics, recovery, OAuth readiness, team roles, ca
   assert.match(schema, /workspaceMembers/);
   assert.match(migration, /CREATE TABLE `workspace_members`/);
 });
+
+test("production v34 wires the seven critical foundations", async () => {
+  const [page, render, integrations, callback, team, backup, resumable, uploads, server, schema, migration] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/clips/[id]/render/route.ts"),
+    source("app/api/integrations/route.ts"),
+    source("app/api/integrations/callback/route.ts"),
+    source("app/api/team/route.ts"),
+    source("app/api/backup/route.ts"),
+    source("app/api/projects/[id]/resumable/route.ts"),
+    source("app/api/uploads/route.ts"),
+    source("lib/server.ts"),
+    source("db/schema.ts"),
+    source("drizzle/0019_tearful_synch.sql"),
+  ]);
+  assert.match(render, /\/jobs\/\$\{encodeURIComponent/);
+  assert.match(page, /Native MP4 H\.264\/AAC/);
+  assert.match(integrations, /oauth_states/);
+  assert.match(callback, /expires_at>/);
+  assert.match(server, /roleAllows/);
+  assert.match(team, /EMAIL_SERVICE_URL/);
+  assert.match(backup, /workspace-restore/);
+  assert.match(resumable, /completed_parts/);
+  assert.match(uploads, /status='uploading'/);
+  assert.match(schema, /oauthStates/);
+  assert.match(migration, /CREATE TABLE `oauth_states`/);
+});

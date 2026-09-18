@@ -134,6 +134,13 @@
       "when": 1789728231732,
       "tag": "0018_abnormal_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1789728757715,
+      "tag": "0019_tearful_synch",
+      "breakpoints": true
     }
   ]
 }

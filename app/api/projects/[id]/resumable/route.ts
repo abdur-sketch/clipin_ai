@@ -4,6 +4,14 @@ async function owned(projectId: string, userId: string) {
   return bindings.DB.prepare("SELECT id FROM projects WHERE id=? AND user_id=?").bind(projectId,userId).first();
 }
 
+export async function GET(request:Request,context:{params:Promise<{id:string}>}){
+  const user=await currentUser();const {id:projectId}=await context.params;
+  if(!(await owned(projectId,user.id)))return Response.json({error:"Project tidak ditemukan"},{status:404});
+  const url=new URL(request.url),filename=url.searchParams.get("filename"),size=Number(url.searchParams.get("size")||0);
+  const session=await bindings.DB.prepare("SELECT id,filename,size,completed_parts,updated_at FROM upload_sessions WHERE user_id=? AND project_id=? AND status='uploading' AND (? IS NULL OR filename=?) AND (?=0 OR size=?) ORDER BY updated_at DESC LIMIT 1").bind(user.id,projectId,filename,filename,size,size).first<Record<string,unknown>>();
+  return Response.json({session:session?{sessionId:session.id,filename:session.filename,size:session.size,parts:JSON.parse(String(session.completed_parts||"[]")),updatedAt:session.updated_at,chunkSize:8*1024*1024}:null});
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const guarded = guardMutation(request, "resumable-upload"); if (guarded) return guarded;
   const user = await currentUser(); const { id: projectId } = await context.params;
