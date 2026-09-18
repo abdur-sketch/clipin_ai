@@ -23,6 +23,12 @@ export type BrowserMediaClip = {
   audioPreset?: string;
   noiseReduction?: boolean;
   autoLevel?: boolean;
+  reframeMode?: string;
+  cropFocusX?: number;
+  transition?: string;
+  captionAnimation?: string;
+  titleAnimation?: string;
+  audioGain?: number;
   subtitles?: Array<{
     start: number;
     end: number;
@@ -158,6 +164,7 @@ function drawFrame(
   const { width, height } = context.canvas;
   drawVideoCover(context, video, width, height, assets?.focusX);
   const elapsed = video.currentTime - clip.startTime;
+  const duration = Math.max(0.1, clip.endTime - clip.startTime);
   if (assets?.broll && elapsed >= (clip.brollStart || 2) && elapsed <= (clip.brollStart || 2) + 3) {
     context.save();
     context.globalAlpha = 0.96;
@@ -169,17 +176,19 @@ function drawFrame(
   if (clip.hookOverlay !== false) {
     const position = clip.titlePosition || "top";
     const y = position === "bottom" ? height * 0.78 : position === "center" ? height * 0.5 : height * 0.16;
-    drawLabel(
-      context,
-      clip.hook,
-      width / 2,
-      y,
-      width * 0.78,
+    const intro = Math.min(1, elapsed / 0.45);
+    context.save();
+    context.globalAlpha = clip.titleAnimation === "none" ? 1 : intro;
+    if (clip.titleAnimation === "pop") {
+      context.translate(width / 2, y);
+      context.scale(0.8 + intro * 0.2, 0.8 + intro * 0.2);
+      context.translate(-width / 2, -y);
+    }
+    drawLabel(context, clip.hook, width / 2, y, width * 0.78,
       Math.max(32, Math.round((clip.fontSize || 48) * 1.15)),
-      clip.fontColor || "#FFFFFF",
-      clip.fontFamily || "system",
-      clip.fontEffect || "outline",
-    );
+      clip.fontColor || "#FFFFFF", clip.fontFamily || "system",
+      clip.fontEffect || "outline");
+    context.restore();
   }
   if (clip.captionsEnabled !== false) {
     const row = clip.subtitles?.find(
@@ -188,17 +197,25 @@ function drawFrame(
     if (row) {
       const position = clip.captionPosition || "bottom";
       const y = position === "top" ? height * 0.28 : position === "center" ? height * 0.58 : height * 0.86;
+      const rowProgress = Math.min(1, Math.max(0, (video.currentTime - row.start) / 0.18));
+      const animatedSize =
+        clip.captionAnimation === "pop"
+          ? Math.max(28, clip.fontSize || 48) * (0.82 + rowProgress * 0.18)
+          : Math.max(28, clip.fontSize || 48);
+      context.save();
+      if (clip.captionAnimation === "fade") context.globalAlpha = rowProgress;
       drawLabel(
         context,
         row.text,
         width / 2,
         y,
         width * 0.82,
-        Math.max(28, clip.fontSize || 48),
+        animatedSize,
         clip.fontColor || "#FFFFFF",
         clip.fontFamily || "system",
         clip.fontEffect || "outline",
       );
+      context.restore();
     }
   }
   if (clip.watermark !== false) {
@@ -212,6 +229,17 @@ function drawFrame(
   if (assets?.logo) {
     const size = width * 0.13;
     context.drawImage(assets.logo, width * 0.82, height * 0.04, size, size);
+  }
+  if (clip.transition && clip.transition !== "none") {
+    const edge = Math.min(elapsed, duration - elapsed);
+    const strength = Math.max(0, 1 - edge / 0.45);
+    if (strength > 0) {
+      context.save();
+      context.globalAlpha = strength;
+      context.fillStyle = clip.transition === "white" ? "#fff" : "#000";
+      context.fillRect(0, 0, width, height);
+      context.restore();
+    }
   }
 }
 
@@ -321,11 +349,11 @@ export async function renderVideoInBrowser(
       : clip.audioPreset === "studio"
         ? 5
         : 3;
-    gain.gain.value = clip.autoLevel === false
+    gain.gain.value = (clip.autoLevel === false
       ? 1
       : clip.audioPreset === "studio"
         ? 1.18
-        : 1.08;
+        : 1.08) * Math.max(0.5, Math.min(1.5, clip.audioGain || 1));
     const destination = audioContext.createMediaStreamDestination();
     source
       .connect(highpass)
@@ -360,8 +388,19 @@ export async function renderVideoInBrowser(
       };
     }
   ).FaceDetector;
-  const detector = clip.faceTracking && detectorApi ? new detectorApi({ fastMode: true, maxDetectedFaces: 1 }) : null;
-  let focusX = 0.5;
+  const detector =
+    clip.faceTracking &&
+    clip.reframeMode !== "center" &&
+    clip.reframeMode !== "manual" &&
+    detectorApi
+      ? new detectorApi({ fastMode: true, maxDetectedFaces: 1 })
+      : null;
+  let focusX =
+    clip.reframeMode === "left"
+      ? 0.3
+      : clip.reframeMode === "right"
+        ? 0.7
+        : Math.max(0.1, Math.min(0.9, clip.cropFocusX || 0.5));
   let frameNumber = 0;
   let animation = 0;
   const finish = () => {

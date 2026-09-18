@@ -100,6 +100,12 @@ type Clip = {
   noiseReduction?: boolean;
   autoLevel?: boolean;
   speakerColors?: boolean;
+  reframeMode?: string;
+  cropFocusX?: number;
+  transition?: string;
+  captionAnimation?: string;
+  audioGain?: number;
+  renderError?: string;
   brollName?: string;
   brollStart?: number;
   watermark?: boolean;
@@ -132,6 +138,17 @@ function youtubeVideoId(value?: string) {
     return "";
   }
   return "";
+}
+
+function scoreBreakdown(clip: Clip) {
+  const base = Math.max(45, Math.min(98, clip.score));
+  const words = `${clip.title} ${clip.hook}`.trim().split(/\s+/).length;
+  return [
+    { label: "Hook", value: Math.min(99, base + (words <= 18 ? 4 : -2)) },
+    { label: "Insight", value: Math.min(98, base + (clip.reason ? 2 : -5)) },
+    { label: "Clarity", value: Math.min(97, base + (clip.title.length < 72 ? 3 : -3)) },
+    { label: "Retention", value: Math.min(99, base + (clip.duration <= 45 ? 2 : -2)) },
+  ];
 }
 
 const demoClips: Clip[] = [
@@ -378,6 +395,12 @@ export default function Home() {
           autoLevel:
             item.auto_level === undefined ? true : Boolean(item.auto_level),
           speakerColors: Boolean(item.speaker_colors),
+          reframeMode: String(item.reframe_mode || "auto"),
+          cropFocusX: Number(item.crop_focus_x ?? 0.5),
+          transition: String(item.transition || "fade"),
+          captionAnimation: String(item.caption_animation || "pop"),
+          audioGain: Number(item.audio_gain ?? 1),
+          renderError: item.render_error ? String(item.render_error) : undefined,
           brollName: item.broll_key
             ? String(item.broll_key).split("/").pop()
             : undefined,
@@ -641,6 +664,14 @@ export default function Home() {
             autoLevel:
               item.auto_level === undefined ? true : Boolean(item.auto_level),
             speakerColors: Boolean(item.speaker_colors),
+            reframeMode: String(item.reframe_mode || "auto"),
+            cropFocusX: Number(item.crop_focus_x ?? 0.5),
+            transition: String(item.transition || "fade"),
+            captionAnimation: String(item.caption_animation || "pop"),
+            audioGain: Number(item.audio_gain ?? 1),
+            renderError: item.render_error
+              ? String(item.render_error)
+              : undefined,
             brollName: item.broll_key
               ? String(item.broll_key).split("/").pop()
               : undefined,
@@ -724,7 +755,9 @@ export default function Home() {
       } else await new Promise((resolve) => window.setTimeout(resolve, 450));
       setClipItems((items) =>
         items.map((item) =>
-          item.id === clip.id ? { ...item, status: "rendered" } : item,
+          item.id === clip.id
+            ? { ...item, status: "rendered", renderError: undefined }
+            : item,
         ),
       );
       setToast(
@@ -732,18 +765,20 @@ export default function Home() {
       );
       setRenderProgress((items) => ({ ...items, [renderId]: 100 }));
     } catch (error) {
-      setClipItems((items) =>
-        items.map((item) =>
-          item.id === clip.id ? { ...item, status: "ready" } : item,
-        ),
-      );
-      setToast(
+      const message =
         error instanceof DOMException && error.name === "AbortError"
           ? "Render dibatalkan"
           : error instanceof Error
             ? error.message
-            : "Render gagal",
+            : "Render gagal";
+      setClipItems((items) =>
+        items.map((item) =>
+          item.id === clip.id
+            ? { ...item, status: "ready", renderError: message }
+            : item,
+        ),
       );
+      setToast(message);
     } finally {
       renderControllers.current.delete(renderId);
       setRenderingIds((items) => items.filter((id) => id !== String(clip.id)));
@@ -804,6 +839,11 @@ export default function Home() {
             noiseReduction: updated.noiseReduction ?? true,
             autoLevel: updated.autoLevel ?? true,
             speakerColors: updated.speakerColors ?? false,
+            reframeMode: updated.reframeMode ?? "auto",
+            cropFocusX: updated.cropFocusX ?? 0.5,
+            transition: updated.transition ?? "fade",
+            captionAnimation: updated.captionAnimation ?? "pop",
+            audioGain: updated.audioGain ?? 1,
             brollStart: updated.brollStart ?? 2,
             watermark: updated.watermark ?? true,
             subtitles: updated.subtitles ?? [],
@@ -1625,6 +1665,36 @@ function ClipsPage({
           <ArrowRight />
         </button>
       </div>
+      {(renderingIds.length > 0 || items.some((clip) => clip.renderError)) && (
+        <section className="render-queue-panel">
+          <div>
+            <span>RENDER QUEUE</span>
+            <b>{renderingIds.length ? `${renderingIds.length} sedang diproses` : "Perlu perhatian"}</b>
+          </div>
+          {items
+            .filter((clip) => renderingIds.includes(String(clip.id)) || clip.renderError)
+            .map((clip) => (
+              <div className="queue-row" key={clip.id}>
+                <span className={clip.renderError ? "failed" : "running"} />
+                <div>
+                  <b>{clip.title}</b>
+                  <small>
+                    {clip.renderError || `${renderProgress[String(clip.id)] || 0}% · render browser berjalan`}
+                  </small>
+                </div>
+                {clip.renderError ? (
+                  <button onClick={() => onRender(clip)}>
+                    <RefreshCw /> Retry
+                  </button>
+                ) : (
+                  <button onClick={() => onCancelRender(clip)}>
+                    <X /> Batalkan
+                  </button>
+                )}
+              </div>
+            ))}
+        </section>
+      )}
       {selectedIds.length > 0 && (
         <div className="batch-action-bar" role="toolbar" aria-label="Aksi klip terpilih">
           <div>
@@ -1839,6 +1909,7 @@ function ClipPreview({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [mediaFailed, setMediaFailed] = useState(false);
   const rendered = clip.status === "rendered";
+  const breakdown = scoreBreakdown(clip);
   const youtubeId = youtubeVideoId(clip.sourceUrl);
   function positionPreview() {
     if (!rendered && videoRef.current)
@@ -1920,6 +1991,19 @@ function ClipPreview({
               <strong>Mengapa dipilih:</strong> {clip.reason}
             </p>
           )}
+          <div className="score-breakdown">
+            <div>
+              <span>VIRAL SCORE BREAKDOWN</span>
+              <b>Kenapa klip ini kuat</b>
+            </div>
+            {breakdown.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <i><b style={{ width: `${item.value}%` }} /></i>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
+          </div>
           {!rendered && (
             <p className="preview-note">
               Ini masih video sumber, belum hasil final. Buka Studio Lengkap
@@ -3114,6 +3198,13 @@ function ClipEditor({
   const [speakerColors, setSpeakerColors] = useState(
     clip.speakerColors ?? false,
   );
+  const [reframeMode, setReframeMode] = useState(clip.reframeMode || "auto");
+  const [cropFocusX, setCropFocusX] = useState(clip.cropFocusX ?? 0.5);
+  const [transition, setTransition] = useState(clip.transition || "fade");
+  const [captionAnimation, setCaptionAnimation] = useState(
+    clip.captionAnimation || "pop",
+  );
+  const [audioGain, setAudioGain] = useState(clip.audioGain ?? 1);
   const [watermark, setWatermark] = useState(clip.watermark ?? true);
   const [logoName, setLogoName] = useState(clip.logoName || "");
   const [brollName, setBrollName] = useState(clip.brollName || "");
@@ -3147,6 +3238,10 @@ function ClipEditor({
     ),
     [captionBusy, setCaptionBusy] = useState(false);
   const [hookVariants, setHookVariants] = useState<string[]>([]);
+  const [templateName, setTemplateName] = useState("");
+  const [savedTemplates, setSavedTemplates] = useState<
+    Array<{ name: string; settings: Record<string, unknown> }>
+  >([]);
   const [currentSubtitle, setCurrentSubtitle] = useState(
     subtitleRows.find(
       (item) => item.start <= startTime && item.end >= startTime,
@@ -3325,6 +3420,11 @@ function ClipEditor({
     noiseReduction,
     autoLevel,
     speakerColors,
+    reframeMode,
+    cropFocusX,
+    transition,
+    captionAnimation,
+    audioGain,
     brollStart,
     watermark,
     startTime,
@@ -3350,7 +3450,9 @@ function ClipEditor({
     fetch(`/api/studio?clipId=${clip.id}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((result) => {
-        if (active && result?.draft) restoreStudio(JSON.stringify(result.draft));
+        if (!active) return;
+        if (Array.isArray(result?.templates)) setSavedTemplates(result.templates);
+        if (result?.draft) restoreStudio(JSON.stringify(result.draft));
       })
       .catch(() => {})
       .finally(() => active && setCloudDraftReady(true));
@@ -3424,6 +3526,11 @@ function ClipEditor({
     setNoiseReduction(state.noiseReduction ?? true);
     setAutoLevel(state.autoLevel ?? true);
     setSpeakerColors(state.speakerColors);
+    setReframeMode(state.reframeMode || "auto");
+    setCropFocusX(state.cropFocusX ?? 0.5);
+    setTransition(state.transition || "fade");
+    setCaptionAnimation(state.captionAnimation || "pop");
+    setAudioGain(state.audioGain ?? 1);
     setBrollStart(state.brollStart);
     setWatermark(state.watermark);
     setStartTime(state.startTime);
@@ -3485,6 +3592,86 @@ function ClipEditor({
       `Ini alasan ${subject.toLowerCase()} penting untuk kamu`.slice(0, 160),
     ]);
     onNotice("3 variasi hook dibuat di browser");
+  }
+  function currentTemplateSettings() {
+    return {
+      ratio,
+      fontSize,
+      fontFamily,
+      fontColor,
+      fontEffect,
+      titleEffect,
+      titleAnimation,
+      titlePosition,
+      captionPosition,
+      captionAnimation,
+      style,
+      reframeMode,
+      cropFocusX,
+      transition,
+      audioPreset,
+      audioGain,
+      noiseReduction,
+      autoLevel,
+      watermark,
+    };
+  }
+  async function persistTemplates(
+    templates: Array<{ name: string; settings: Record<string, unknown> }>,
+  ) {
+    setSavedTemplates(templates);
+    const response = await fetch("/api/studio", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "templates", value: templates }),
+    });
+    if (!response.ok) throw new Error("Template gagal disimpan");
+  }
+  async function saveCreatorTemplate() {
+    const name = templateName.trim();
+    if (!name) return onNotice("Masukkan nama template terlebih dahulu");
+    try {
+      const next = [
+        { name: name.slice(0, 50), settings: currentTemplateSettings() },
+        ...savedTemplates.filter((item) => item.name !== name),
+      ].slice(0, 20);
+      await persistTemplates(next);
+      setTemplateName("");
+      onNotice(`Template ${name} tersimpan di cloud`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Template gagal disimpan");
+    }
+  }
+  function applyCreatorTemplate(template: (typeof savedTemplates)[number]) {
+    const value = template.settings;
+    setRatio(String(value.ratio || "9:16"));
+    setFontSize(Number(value.fontSize || 48));
+    setFontFamily(String(value.fontFamily || "system"));
+    setFontColor(String(value.fontColor || "#FFFFFF"));
+    setFontEffect(String(value.fontEffect || "outline"));
+    setTitleEffect(String(value.titleEffect || "background"));
+    setTitleAnimation(String(value.titleAnimation || "fade"));
+    setTitlePosition(String(value.titlePosition || "top"));
+    setCaptionPosition(String(value.captionPosition || "bottom"));
+    setCaptionAnimation(String(value.captionAnimation || "pop"));
+    setStyle(String(value.style || "Bold"));
+    setReframeMode(String(value.reframeMode || "auto"));
+    setCropFocusX(Number(value.cropFocusX ?? 0.5));
+    setTransition(String(value.transition || "fade"));
+    setAudioPreset(String(value.audioPreset || "podcast"));
+    setAudioGain(Number(value.audioGain ?? 1));
+    setNoiseReduction(value.noiseReduction !== false);
+    setAutoLevel(value.autoLevel !== false);
+    setWatermark(value.watermark !== false);
+    onNotice(`Template ${template.name} diterapkan`);
+  }
+  async function deleteCreatorTemplate(name: string) {
+    try {
+      await persistTemplates(savedTemplates.filter((item) => item.name !== name));
+      onNotice(`Template ${name} dihapus`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Template gagal dihapus");
+    }
   }
   async function saveBrandKit() {
     const kit = {
@@ -3664,6 +3851,12 @@ function ClipEditor({
         fontEffect,
         titlePosition,
         captionPosition,
+        reframeMode,
+        cropFocusX,
+        transition,
+        captionAnimation,
+        titleAnimation,
+        audioGain,
         hookOverlay: hook,
         captionsEnabled: subtitle,
         watermark,
@@ -3711,6 +3904,12 @@ function ClipEditor({
         fontEffect,
         titlePosition,
         captionPosition,
+        reframeMode,
+        cropFocusX,
+        transition,
+        captionAnimation,
+        titleAnimation,
+        audioGain,
         hookOverlay: hook,
         captionsEnabled: subtitle,
         watermark,
@@ -3988,6 +4187,7 @@ function ClipEditor({
                   src={`/api/clips/${clip.id}/media?source=1&v=${mediaVersion}`}
                   playsInline
                   preload="metadata"
+                  style={{ objectPosition: `${cropFocusX * 100}% center` }}
                   onLoadedMetadata={() => {
                     if (studioVideoRef.current) {
                       setMediaState("ready");
@@ -4285,6 +4485,75 @@ function ClipEditor({
                 ))}
               </div>
             </section>
+            <section className="creator-pro-controls">
+              <div className="creator-pro-heading">
+                <div>
+                  <span>SMART AUTO-REFRAME</span>
+                  <b>Fokus subjek & finishing</b>
+                </div>
+                <Gauge />
+              </div>
+              <div className="reframe-options">
+                {[
+                  ["auto", "Auto Face"],
+                  ["center", "Center"],
+                  ["left", "Left"],
+                  ["right", "Right"],
+                  ["manual", "Manual"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={reframeMode === value ? "active" : ""}
+                    onClick={() => {
+                      setReframeMode(value);
+                      if (value === "left") setCropFocusX(0.3);
+                      if (value === "center") setCropFocusX(0.5);
+                      if (value === "right") setCropFocusX(0.7);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label>
+                Titik fokus <b>{Math.round(cropFocusX * 100)}%</b>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="0.9"
+                  step="0.01"
+                  value={cropFocusX}
+                  onChange={(event) => {
+                    setCropFocusX(Number(event.target.value));
+                    setReframeMode("manual");
+                  }}
+                />
+              </label>
+              <div className="advanced-grid">
+                <label>
+                  Transisi klip
+                  <select
+                    value={transition}
+                    onChange={(event) => setTransition(event.target.value)}
+                  >
+                    <option value="none">Tanpa transisi</option>
+                    <option value="fade">Fade black</option>
+                    <option value="white">Flash white</option>
+                  </select>
+                </label>
+                <label>
+                  Animasi caption
+                  <select
+                    value={captionAnimation}
+                    onChange={(event) => setCaptionAnimation(event.target.value)}
+                  >
+                    <option value="none">Static</option>
+                    <option value="fade">Fade per baris</option>
+                    <option value="pop">Pop per baris</option>
+                  </select>
+                </label>
+              </div>
+            </section>
             <label>
               Judul clip
               <input
@@ -4396,6 +4665,40 @@ function ClipEditor({
                 </button>
               </div>
             </label>
+            <section className="creator-templates">
+              <div>
+                <span>CREATOR TEMPLATES</span>
+                <b>Simpan seluruh pengaturan Studio</b>
+              </div>
+              <div className="template-save-row">
+                <input
+                  value={templateName}
+                  maxLength={50}
+                  placeholder="Nama template, contoh: Podcast Harian"
+                  onChange={(event) => setTemplateName(event.target.value)}
+                />
+                <button onClick={saveCreatorTemplate}>Simpan</button>
+              </div>
+              {savedTemplates.length ? (
+                <div className="saved-template-list">
+                  {savedTemplates.map((template) => (
+                    <div key={template.name}>
+                      <button onClick={() => applyCreatorTemplate(template)}>
+                        <Clapperboard /> {template.name}
+                      </button>
+                      <button
+                        aria-label={`Hapus template ${template.name}`}
+                        onClick={() => deleteCreatorTemplate(template.name)}
+                      >
+                        <Trash2 />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <small>Belum ada template tersimpan.</small>
+              )}
+            </section>
             <button
               className="studio-feature-button"
               onClick={generateThumbnail}
@@ -4599,6 +4902,17 @@ function ClipEditor({
                   </button>
                 ))}
               </div>
+            </label>
+            <label>
+              Intensitas audio <b>{Math.round(audioGain * 100)}%</b>
+              <input
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.05"
+                value={audioGain}
+                onChange={(event) => setAudioGain(Number(event.target.value))}
+              />
             </label>
             <div className="advanced-grid">
               <label>
@@ -4842,6 +5156,11 @@ function ClipEditor({
                     noiseReduction,
                     autoLevel,
                     speakerColors,
+                    reframeMode,
+                    cropFocusX,
+                    transition,
+                    captionAnimation,
+                    audioGain,
                     brollName,
                     brollStart,
                     watermark,

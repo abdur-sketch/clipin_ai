@@ -1,15 +1,15 @@
 import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
 
-type StudioPreferences = { brand_kit?: string; drafts?: string };
+type StudioPreferences = { brand_kit?: string; drafts?: string; templates?: string };
 
 async function currentPreferences(userId: string) {
   await bindings.DB.prepare(
-    "INSERT OR IGNORE INTO studio_preferences (user_id,brand_kit,drafts,updated_at) VALUES (?,'{}','{}',?)",
+    "INSERT OR IGNORE INTO studio_preferences (user_id,brand_kit,drafts,templates,updated_at) VALUES (?,'{}','{}','[]',?)",
   )
     .bind(userId, Date.now())
     .run();
   return bindings.DB.prepare(
-    "SELECT brand_kit,drafts FROM studio_preferences WHERE user_id=?",
+    "SELECT brand_kit,drafts,templates FROM studio_preferences WHERE user_id=?",
   )
     .bind(userId)
     .first<StudioPreferences>();
@@ -30,6 +30,13 @@ export async function GET(request: Request) {
   const drafts = objectValue(row?.drafts) as Record<string, unknown>;
   return Response.json({
     brandKit: objectValue(row?.brand_kit),
+    templates: (() => {
+      try {
+        return JSON.parse(row?.templates || "[]");
+      } catch {
+        return [];
+      }
+    })(),
     draft: clipId ? drafts[clipId] || null : null,
   });
 }
@@ -64,6 +71,16 @@ export async function POST(request: Request) {
       .bind(value, Date.now(), user.id)
       .run();
     return Response.json({ ok: true });
+  }
+  if (body.action === "templates") {
+    const templates = Array.isArray(body.value) ? body.value.slice(0, 20) : [];
+    const value = JSON.stringify(templates).slice(0, 100000);
+    await bindings.DB.prepare(
+      "UPDATE studio_preferences SET templates=?,updated_at=? WHERE user_id=?",
+    )
+      .bind(value, Date.now(), user.id)
+      .run();
+    return Response.json({ ok: true, templates });
   }
   return jsonError("Aksi Studio tidak dikenali");
 }

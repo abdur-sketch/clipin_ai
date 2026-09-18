@@ -438,3 +438,30 @@ test("creator workflow includes render readiness, platform presets, hook variant
   assert.match(css, /\.platform-presets/);
   assert.match(css, /\.batch-action-bar/);
 });
+
+test("Creator Pro persists auto-reframe, transitions, caption motion, audio gain, templates, and render recovery", async () => {
+  const [page, media, clipApi, studioApi, schema, migration] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/browser-media.ts"),
+    source("app/api/clips/[id]/route.ts"),
+    source("app/api/studio/route.ts"),
+    source("db/schema.ts"),
+    source("drizzle/0014_marvelous_katie_power.sql"),
+  ]);
+  for (const feature of [
+    "SMART AUTO-REFRAME",
+    "CREATOR TEMPLATES",
+    "VIRAL SCORE BREAKDOWN",
+    "RENDER QUEUE",
+    "Animasi caption",
+    "Intensitas audio",
+  ])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(media, /FaceDetector/);
+  assert.match(media, /captionAnimation/);
+  assert.match(media, /audioGain/);
+  assert.match(clipApi, /reframe_mode/);
+  assert.match(studioApi, /body\.action === "templates"/);
+  assert.match(schema, /cropFocusX/);
+  assert.match(migration, /ADD `templates`/);
+});

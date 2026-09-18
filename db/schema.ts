@@ -74,6 +74,11 @@ export const clips = sqliteTable("clips", {
   speakerColors: integer("speaker_colors", { mode: "boolean" })
     .notNull()
     .default(false),
+  reframeMode: text("reframe_mode").notNull().default("auto"),
+  cropFocusX: real("crop_focus_x").notNull().default(0.5),
+  transition: text("transition").notNull().default("fade"),
+  captionAnimation: text("caption_animation").notNull().default("pop"),
+  audioGain: real("audio_gain").notNull().default(1),
   brollKey: text("broll_key"),
   brollStart: real("broll_start").notNull().default(2),
   thumbnailKey: text("thumbnail_key"),
@@ -197,6 +202,7 @@ export const studioPreferences = sqliteTable("studio_preferences", {
   userId: text("user_id").primaryKey(),
   brandKit: text("brand_kit").notNull().default("{}"),
   drafts: text("drafts").notNull().default("{}"),
+  templates: text("templates").notNull().default("[]"),
   updatedAt: integer("updated_at").notNull(),
 });
 
