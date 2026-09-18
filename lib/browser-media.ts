@@ -29,6 +29,12 @@ export type BrowserMediaClip = {
   captionAnimation?: string;
   titleAnimation?: string;
   audioGain?: number;
+  exportResolution?: string;
+  exportFps?: number;
+  exportBitrate?: number;
+  musicName?: string;
+  musicVolume?: number;
+  audioDucking?: boolean;
   subtitles?: Array<{
     start: number;
     end: number;
@@ -56,10 +62,13 @@ function waitFor(target: EventTarget, name: string) {
   });
 }
 
-function dimensions(ratio = "9:16") {
-  if (ratio === "16:9") return { width: 1280, height: 720 };
-  if (ratio === "1:1") return { width: 900, height: 900 };
-  return { width: 720, height: 1280 };
+function dimensions(ratio = "9:16", resolution = "720p") {
+  const high = resolution === "1080p";
+  if (ratio === "16:9")
+    return high ? { width: 1920, height: 1080 } : { width: 1280, height: 720 };
+  if (ratio === "1:1")
+    return high ? { width: 1080, height: 1080 } : { width: 720, height: 720 };
+  return high ? { width: 1080, height: 1920 } : { width: 720, height: 1280 };
 }
 
 function fontStack(name = "system") {
@@ -319,10 +328,12 @@ export async function renderVideoInBrowser(
     clip.brollName ? optionalImage(`/api/clips/${clip.id}/broll`) : undefined,
   ]);
   const canvas = document.createElement("canvas");
-  Object.assign(canvas, dimensions(clip.aspectRatio));
+  Object.assign(canvas, dimensions(clip.aspectRatio, clip.exportResolution));
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("Canvas tidak tersedia");
-  const output = canvas.captureStream(30);
+  const output = canvas.captureStream(
+    Math.max(24, Math.min(60, clip.exportFps || 30)),
+  );
   let audioContext: AudioContext | undefined;
   if (
     (clip.audioPreset && clip.audioPreset !== "natural") ||
@@ -361,6 +372,22 @@ export async function renderVideoInBrowser(
       .connect(compressor)
       .connect(gain)
       .connect(destination);
+    if (clip.musicName) {
+      const music = document.createElement("audio");
+      music.src = `/api/clips/${clip.id}/music`;
+      music.loop = true;
+      music.crossOrigin = "use-credentials";
+      await waitFor(music, "canplay");
+      const musicSource = audioContext.createMediaElementSource(music);
+      const musicGain = audioContext.createGain();
+      musicGain.gain.value =
+        Math.max(0, Math.min(0.7, clip.musicVolume ?? 0.18)) *
+        (clip.audioDucking === false ? 1 : 0.42);
+      musicSource.connect(musicGain).connect(destination);
+      music.currentTime = 0;
+      void music.play();
+      video.addEventListener("pause", () => music.pause(), { once: true });
+    }
     destination.stream.getAudioTracks().forEach((track) => output.addTrack(track));
   } else {
     const capture = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream?.();
@@ -376,6 +403,9 @@ export async function renderVideoInBrowser(
   const recorder = new MediaRecorder(output, {
     ...(mimeType ? { mimeType } : {}),
     videoBitsPerSecond: 5_000_000,
+    ...(clip.exportBitrate
+      ? { videoBitsPerSecond: clip.exportBitrate * 1_000_000 }
+      : {}),
   });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);

@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   title: "KLIYU — Create Your Moment",
   description: "Personal content business OS untuk mengubah video panjang menjadi short clips, melacak performa, dan mencatat pendapatan.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "KLIYU", statusBarStyle: "black-translucent" },
   openGraph: {
     title: "KLIYU — Create Your Moment",
     description: "From long video to clips, performance insights, and revenue in one personal workspace.",

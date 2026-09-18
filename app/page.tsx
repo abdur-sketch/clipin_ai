@@ -105,6 +105,12 @@ type Clip = {
   transition?: string;
   captionAnimation?: string;
   audioGain?: number;
+  exportResolution?: string;
+  exportFps?: number;
+  exportBitrate?: number;
+  musicName?: string;
+  musicVolume?: number;
+  audioDucking?: boolean;
   renderError?: string;
   brollName?: string;
   brollStart?: number;
@@ -315,6 +321,10 @@ export default function Home() {
     void loadProjects();
   }, []);
   useEffect(() => {
+    if ("serviceWorker" in navigator)
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+  useEffect(() => {
     fetch("/api/content")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => data?.summary && setBusiness(data.summary))
@@ -400,6 +410,15 @@ export default function Home() {
           transition: String(item.transition || "fade"),
           captionAnimation: String(item.caption_animation || "pop"),
           audioGain: Number(item.audio_gain ?? 1),
+          exportResolution: String(item.export_resolution || "1080p"),
+          exportFps: Number(item.export_fps || 30),
+          exportBitrate: Number(item.export_bitrate || 5),
+          musicName: item.music_key
+            ? String(item.music_key).split("/").pop()
+            : undefined,
+          musicVolume: Number(item.music_volume ?? 0.18),
+          audioDucking:
+            item.audio_ducking === undefined ? true : Boolean(item.audio_ducking),
           renderError: item.render_error ? String(item.render_error) : undefined,
           brollName: item.broll_key
             ? String(item.broll_key).split("/").pop()
@@ -669,6 +688,17 @@ export default function Home() {
             transition: String(item.transition || "fade"),
             captionAnimation: String(item.caption_animation || "pop"),
             audioGain: Number(item.audio_gain ?? 1),
+            exportResolution: String(item.export_resolution || "1080p"),
+            exportFps: Number(item.export_fps || 30),
+            exportBitrate: Number(item.export_bitrate || 5),
+            musicName: item.music_key
+              ? String(item.music_key).split("/").pop()
+              : undefined,
+            musicVolume: Number(item.music_volume ?? 0.18),
+            audioDucking:
+              item.audio_ducking === undefined
+                ? true
+                : Boolean(item.audio_ducking),
             renderError: item.render_error
               ? String(item.render_error)
               : undefined,
@@ -844,6 +874,11 @@ export default function Home() {
             transition: updated.transition ?? "fade",
             captionAnimation: updated.captionAnimation ?? "pop",
             audioGain: updated.audioGain ?? 1,
+            exportResolution: updated.exportResolution ?? "1080p",
+            exportFps: updated.exportFps ?? 30,
+            exportBitrate: updated.exportBitrate ?? 5,
+            musicVolume: updated.musicVolume ?? 0.18,
+            audioDucking: updated.audioDucking ?? true,
             brollStart: updated.brollStart ?? 2,
             watermark: updated.watermark ?? true,
             subtitles: updated.subtitles ?? [],
@@ -2679,6 +2714,11 @@ function SettingsPage({
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [deviceAi] = useState(() => browserAiReadiness());
   const [modelProgress, setModelProgress] = useState<number | null>(null);
+  const [storage, setStorage] = useState<{
+    groups: Array<{ name: string; files: number; bytes: number }>;
+    totalFiles: number;
+    totalBytes: number;
+  }>({ groups: [], totalFiles: 0, totalBytes: 0 });
   function jump(id: string) {
     setActive(id);
     document
@@ -2726,6 +2766,10 @@ function SettingsPage({
       .then((r) => (r.ok ? r.json() : {}))
       .then(setCapabilities)
       .catch(() => {});
+    fetch("/api/storage")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data && setStorage(data))
+      .catch(() => {});
   }, []);
   return (
     <div className="page settings-page">
@@ -2748,6 +2792,7 @@ function SettingsPage({
             ["video", "Video defaults"],
             ["notifications", "Notifications"],
             ["integrations", "Integrations"],
+            ["storage", "Storage"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -2907,6 +2952,40 @@ function SettingsPage({
               }}
             >
               <Download /> {modelProgress === null ? "Siapkan model sekarang" : `Menyiapkan ${modelProgress}%`}
+            </button>
+          </section>
+          <section id="settings-storage" className="settings-panel">
+            <div>
+              <small>STORAGE MANAGER</small>
+              <h2>Media dan hasil render</h2>
+            </div>
+            <div className="storage-overview">
+              <strong>
+                {(storage.totalBytes / 1024 / 1024).toFixed(1)} MB
+              </strong>
+              <span>{storage.totalFiles} file tersimpan</span>
+            </div>
+            <div className="storage-groups">
+              {storage.groups.map((group) => (
+                <div key={group.name}>
+                  <span><b>{group.name}</b><small>{group.files} file</small></span>
+                  <strong>{(group.bytes / 1024 / 1024).toFixed(1)} MB</strong>
+                </div>
+              ))}
+            </div>
+            <button
+              className="outline-button storage-cleanup-button"
+              onClick={async () => {
+                if (!window.confirm("Hapus semua hasil render? Video sumber, musik, dan B-roll tetap aman.")) return;
+                const response = await fetch("/api/storage", { method: "DELETE" });
+                const result = await response.json();
+                if (!response.ok) return notify(result.error || "Pembersihan gagal");
+                const refreshed = await fetch("/api/storage").then((item) => item.json());
+                setStorage(refreshed);
+                notify(`${result.removed} hasil render dihapus. Video sumber tetap aman.`);
+              }}
+            >
+              <Trash2 /> Bersihkan hasil render
             </button>
           </section>
         </div>
@@ -3251,6 +3330,14 @@ function ClipEditor({
     clip.captionAnimation || "pop",
   );
   const [audioGain, setAudioGain] = useState(clip.audioGain ?? 1);
+  const [exportResolution, setExportResolution] = useState(
+    clip.exportResolution || "1080p",
+  );
+  const [exportFps, setExportFps] = useState(clip.exportFps || 30);
+  const [exportBitrate, setExportBitrate] = useState(clip.exportBitrate || 5);
+  const [musicName, setMusicName] = useState(clip.musicName || "");
+  const [musicVolume, setMusicVolume] = useState(clip.musicVolume ?? 0.18);
+  const [audioDucking, setAudioDucking] = useState(clip.audioDucking ?? true);
   const [watermark, setWatermark] = useState(clip.watermark ?? true);
   const [logoName, setLogoName] = useState(clip.logoName || "");
   const [brollName, setBrollName] = useState(clip.brollName || "");
@@ -3293,6 +3380,7 @@ function ClipEditor({
     audience: "Kreator dan pemilik bisnis Indonesia",
     cta: "Simpan dan bagikan video ini",
     bannedWords: "",
+    customTerms: "",
   });
   const [sceneMarkers, setSceneMarkers] = useState<number[]>([]);
   const [brollSuggestions, setBrollSuggestions] = useState<
@@ -3302,6 +3390,16 @@ function ClipEditor({
     Array<{ format: string; content: string }>
   >([]);
   const [thumbnailScores, setThumbnailScores] = useState<number[]>([]);
+  const [qualityIssues, setQualityIssues] = useState<
+    Array<{ label: string; fix: string; ok: boolean }>
+  >([]);
+  const [versions, setVersions] = useState<
+    Array<{ id: string; label: string; created_at: number }>
+  >([]);
+  const [reviews, setReviews] = useState<
+    Array<{ id: string; author: string; message: string; timestamp: number; status: string; created_at: number }>
+  >([]);
+  const [reviewMessage, setReviewMessage] = useState("");
   const [currentSubtitle, setCurrentSubtitle] = useState(
     subtitleRows.find(
       (item) => item.start <= startTime && item.end >= startTime,
@@ -3485,6 +3583,11 @@ function ClipEditor({
     transition,
     captionAnimation,
     audioGain,
+    exportResolution,
+    exportFps,
+    exportBitrate,
+    musicVolume,
+    audioDucking,
     brollStart,
     watermark,
     startTime,
@@ -3537,6 +3640,22 @@ function ClipEditor({
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [studioSnapshot, clip.id, cloudDraftReady]);
+  useEffect(() => {
+    if (typeof clip.id !== "string") return;
+    Promise.all([
+      fetch(`/api/clips/${clip.id}/versions`).then((response) =>
+        response.ok ? response.json() : { versions: [] },
+      ),
+      fetch(`/api/clips/${clip.id}/review`).then((response) =>
+        response.ok ? response.json() : { reviews: [] },
+      ),
+    ])
+      .then(([versionData, reviewData]) => {
+        setVersions(versionData.versions || []);
+        setReviews(reviewData.reviews || []);
+      })
+      .catch(() => {});
+  }, [clip.id]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -3593,6 +3712,11 @@ function ClipEditor({
     setTransition(state.transition || "fade");
     setCaptionAnimation(state.captionAnimation || "pop");
     setAudioGain(state.audioGain ?? 1);
+    setExportResolution(state.exportResolution || "1080p");
+    setExportFps(state.exportFps || 30);
+    setExportBitrate(state.exportBitrate || 5);
+    setMusicVolume(state.musicVolume ?? 0.18);
+    setAudioDucking(state.audioDucking ?? true);
     setBrollStart(state.brollStart);
     setWatermark(state.watermark);
     setStartTime(state.startTime);
@@ -3673,6 +3797,11 @@ function ClipEditor({
       transition,
       audioPreset,
       audioGain,
+      exportResolution,
+      exportFps,
+      exportBitrate,
+      musicVolume,
+      audioDucking,
       noiseReduction,
       autoLevel,
       watermark,
@@ -3722,6 +3851,11 @@ function ClipEditor({
     setTransition(String(value.transition || "fade"));
     setAudioPreset(String(value.audioPreset || "podcast"));
     setAudioGain(Number(value.audioGain ?? 1));
+    setExportResolution(String(value.exportResolution || "1080p"));
+    setExportFps(Number(value.exportFps || 30));
+    setExportBitrate(Number(value.exportBitrate || 5));
+    setMusicVolume(Number(value.musicVolume ?? 0.18));
+    setAudioDucking(value.audioDucking !== false);
     setNoiseReduction(value.noiseReduction !== false);
     setAutoLevel(value.autoLevel !== false);
     setWatermark(value.watermark !== false);
@@ -3955,6 +4089,117 @@ function ClipEditor({
       onNotice(error instanceof Error ? error.message : "Upload B-roll gagal");
     }
   }
+  async function uploadMusic(file?: File) {
+    if (!file || typeof clip.id !== "string") return;
+    setMusicName(file.name);
+    try {
+      const response = await fetch(`/api/clips/${clip.id}/music`, {
+        method: "PUT",
+        headers: {
+          "content-type": file.type || "audio/mpeg",
+          "content-length": String(file.size),
+        },
+        body: file,
+      });
+      if (!response.ok)
+        throw new Error((await response.json()).error || "Upload musik gagal");
+      onNotice("Musik siap dengan auto-ducking");
+    } catch (error) {
+      setMusicName("");
+      onNotice(error instanceof Error ? error.message : "Upload musik gagal");
+    }
+  }
+  function runQualityControl() {
+    const activeRows = subtitleRows.filter(
+      (row) => !row.removed && row.end >= startTime && row.start <= endTime,
+    );
+    const issues = [
+      {
+        label: "Video sumber dapat dirender",
+        ok: sourceAttached || (!youtubeId && mediaState === "ready"),
+        fix: "Pasang video asli",
+      },
+      {
+        label: "Durasi optimal untuk short video",
+        ok: endTime - startTime >= 8 && endTime - startTime <= 60,
+        fix: "Trim menjadi 8–60 detik",
+      },
+      {
+        label: "Subtitle tidak terlalu panjang",
+        ok: activeRows.every((row) => row.text.length <= 84),
+        fix: "Pecah subtitle panjang",
+      },
+      {
+        label: "Teks berada di safe area",
+        ok: safeArea && titlePosition !== captionPosition,
+        fix: "Aktifkan safe area dan pisahkan posisi teks",
+      },
+      {
+        label: "Audio telah dinormalisasi",
+        ok: autoLevel && audioGain >= 0.8 && audioGain <= 1.25,
+        fix: "Aktifkan auto level",
+      },
+      {
+        label: "Hak penggunaan dikonfirmasi",
+        ok: Boolean(sourceAttached || clip.sourceType === "upload"),
+        fix: "Gunakan media yang Anda miliki izinnya",
+      },
+    ];
+    setQualityIssues(issues);
+    onNotice(`${issues.filter((item) => !item.ok).length} masalah kualitas ditemukan`);
+  }
+  function autoFixQuality() {
+    setSafeArea(true);
+    setAutoLevel(true);
+    setNoiseReduction(true);
+    setAudioGain(1);
+    if (titlePosition === captionPosition) setCaptionPosition("bottom");
+    if (endTime - startTime > 60) setEndTime(startTime + 60);
+    setSubtitleRows((rows) =>
+      rows.map((row) => ({ ...row, text: row.text.slice(0, 84) })),
+    );
+    window.setTimeout(runQualityControl, 0);
+    onNotice("Perbaikan aman diterapkan. Masalah sumber tetap memerlukan file asli.");
+  }
+  async function saveVersion() {
+    if (typeof clip.id !== "string") return;
+    const response = await fetch(`/api/clips/${clip.id}/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: `Studio ${new Date().toLocaleString("id-ID")}` }),
+    });
+    if (!response.ok) return onNotice("Versi gagal disimpan");
+    const list = await fetch(`/api/clips/${clip.id}/versions`).then((item) => item.json());
+    setVersions(list.versions || []);
+    onNotice("Snapshot versi berhasil disimpan");
+  }
+  async function restoreVersion(versionId: string) {
+    if (typeof clip.id !== "string") return;
+    const response = await fetch(`/api/clips/${clip.id}/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "restore", versionId }),
+    });
+    if (!response.ok) return onNotice("Versi gagal dipulihkan");
+    onNotice("Versi lama dipulihkan. Buka ulang Studio untuk melihat hasilnya.");
+  }
+  async function submitReview(status = "comment") {
+    if (typeof clip.id !== "string") return;
+    const response = await fetch(`/api/clips/${clip.id}/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: reviewMessage,
+        timestamp: studioTime,
+        status,
+      }),
+    });
+    if (!response.ok) return onNotice("Review gagal disimpan");
+    setReviewMessage("");
+    const list = await fetch(`/api/clips/${clip.id}/review`).then((item) => item.json());
+    setReviews(list.reviews || []);
+    onNotice(status === "approved" ? "Klip disetujui" : "Review tersimpan");
+  }
   async function attachSourceVideo(file?: File) {
     if (!file) return;
     if (!clip.projectId) {
@@ -4014,6 +4259,12 @@ function ClipEditor({
         captionAnimation,
         titleAnimation,
         audioGain,
+        exportResolution,
+        exportFps,
+        exportBitrate,
+        musicName,
+        musicVolume,
+        audioDucking,
         hookOverlay: hook,
         captionsEnabled: subtitle,
         watermark,
@@ -4067,6 +4318,12 @@ function ClipEditor({
         captionAnimation,
         titleAnimation,
         audioGain,
+        exportResolution,
+        exportFps,
+        exportBitrate,
+        musicName,
+        musicVolume,
+        audioDucking,
         hookOverlay: hook,
         captionsEnabled: subtitle,
         watermark,
@@ -4599,6 +4856,33 @@ function ClipEditor({
                 ))}
               </div>
             </section>
+            <section className="quality-control-panel">
+              <div>
+                <span>AI QUALITY CONTROL</span>
+                <button onClick={runQualityControl}>
+                  <Gauge /> Jalankan pemeriksaan
+                </button>
+              </div>
+              {qualityIssues.length ? (
+                <>
+                  <div className="quality-list">
+                    {qualityIssues.map((item) => (
+                      <div className={item.ok ? "ok" : "issue"} key={item.label}>
+                        {item.ok ? <CheckCircle2 /> : <CircleHelp />}
+                        <span><b>{item.label}</b><small>{item.ok ? "Lolos" : item.fix}</small></span>
+                      </div>
+                    ))}
+                  </div>
+                  {qualityIssues.some((item) => !item.ok) && (
+                    <button className="auto-fix-button" onClick={autoFixQuality}>
+                      <WandSparkles /> Perbaiki otomatis
+                    </button>
+                  )}
+                </>
+              ) : (
+                <small>Periksa sumber, durasi, subtitle, safe area, audio, dan izin media.</small>
+              )}
+            </section>
             {youtubeId && !sourceAttached && (
               <section className="source-required-card">
                 <FileVideo2 />
@@ -4998,6 +5282,19 @@ function ClipEditor({
                     }
                   />
                 </label>
+                <label>
+                  Kamus nama & istilah
+                  <input
+                    value={brandVoice.customTerms}
+                    placeholder="KLIYU, nama pembicara, istilah industri..."
+                    onChange={(event) =>
+                      setBrandVoice((value) => ({
+                        ...value,
+                        customTerms: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
               </div>
               <button onClick={saveBrandVoice}>Simpan Brand Voice</button>
             </section>
@@ -5255,6 +5552,67 @@ function ClipEditor({
                 onChange={(event) => setAudioGain(Number(event.target.value))}
               />
             </label>
+            <section className="music-design-panel">
+              <div>
+                <span>MUSIC & SOUND DESIGN</span>
+                <b>{musicName ? "Track siap" : "Tambahkan musik berlisensi"}</b>
+              </div>
+              <label className="logo-upload">
+                Musik latar
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm"
+                  onChange={(event) => uploadMusic(event.target.files?.[0])}
+                />
+                <span>{musicName || "Pilih MP3, M4A, WAV, OGG, atau WebM"}</span>
+              </label>
+              <label>
+                Volume musik <b>{Math.round(musicVolume * 100)}%</b>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.7"
+                  step="0.01"
+                  value={musicVolume}
+                  onChange={(event) => setMusicVolume(Number(event.target.value))}
+                />
+              </label>
+              <Toggle label="Auto-ducking saat bicara" value={audioDucking} setValue={setAudioDucking} />
+            </section>
+            <section className="export-preset-panel">
+              <div>
+                <span>EXPORT PRESETS</span>
+                <b>
+                  Perkiraan {Math.max(1, Math.round(((endTime - startTime) * exportBitrate) / 8))} MB
+                </b>
+              </div>
+              <div className="export-preset-grid">
+                <label>
+                  Resolusi
+                  <select value={exportResolution} onChange={(event) => setExportResolution(event.target.value)}>
+                    <option value="720p">720p Fast</option>
+                    <option value="1080p">1080p Full HD</option>
+                  </select>
+                </label>
+                <label>
+                  Frame rate
+                  <select value={exportFps} onChange={(event) => setExportFps(Number(event.target.value))}>
+                    <option value="24">24 FPS</option>
+                    <option value="30">30 FPS</option>
+                    <option value="60">60 FPS</option>
+                  </select>
+                </label>
+                <label>
+                  Bitrate
+                  <select value={exportBitrate} onChange={(event) => setExportBitrate(Number(event.target.value))}>
+                    <option value="3">3 Mbps · Small</option>
+                    <option value="5">5 Mbps · Balanced</option>
+                    <option value="8">8 Mbps · High</option>
+                    <option value="12">12 Mbps · Ultra</option>
+                  </select>
+                </label>
+              </div>
+            </section>
             <div className="advanced-grid">
               <label>
                 Terjemahan subtitle AI
@@ -5492,6 +5850,64 @@ function ClipEditor({
                 <small>Ubah satu klip menjadi Reels, Shorts, carousel, thread, dan deskripsi.</small>
               )}
             </section>
+            <section className="version-history-panel">
+              <div>
+                <span>VERSION HISTORY</span>
+                <button onClick={saveVersion}>
+                  <Plus /> Simpan snapshot
+                </button>
+              </div>
+              {versions.length ? (
+                versions.slice(0, 5).map((version) => (
+                  <div key={version.id}>
+                    <span>
+                      <b>{version.label}</b>
+                      <small>{new Date(version.created_at).toLocaleString("id-ID")}</small>
+                    </span>
+                    <button onClick={() => restoreVersion(version.id)}>
+                      <RefreshCw /> Restore
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <small>Belum ada snapshot. Simpan sebelum perubahan besar.</small>
+              )}
+            </section>
+            <section className="review-workflow-panel">
+              <div>
+                <span>APPROVAL WORKFLOW</span>
+                <b>Review pada {studioTime.toFixed(1)}s</b>
+              </div>
+              <div className="review-compose">
+                <input
+                  value={reviewMessage}
+                  placeholder="Tulis catatan revisi pada timestamp ini..."
+                  onChange={(event) => setReviewMessage(event.target.value)}
+                />
+                <button disabled={!reviewMessage.trim()} onClick={() => submitReview("comment")}>
+                  Kirim
+                </button>
+              </div>
+              <div className="approval-actions">
+                <button onClick={() => submitReview("revision")}>Minta revisi</button>
+                <button onClick={() => submitReview("approved")}><Check /> Setujui klip</button>
+              </div>
+              {reviews.slice(0, 4).map((review) => (
+                <article key={review.id}>
+                  <span>{review.status} · {review.timestamp.toFixed(1)}s</span>
+                  <p>{review.message}</p>
+                </article>
+              ))}
+            </section>
+            <section className="copyright-checklist">
+              <div><span>COPYRIGHT & SAFETY</span><b>Checklist sebelum publikasi</b></div>
+              <p><CheckCircle2 /> Video sumber milik Anda atau digunakan dengan izin.</p>
+              <p className={musicName ? "warning" : ""}>
+                {musicName ? <CircleHelp /> : <CheckCircle2 />}
+                {musicName ? "Pastikan musik memiliki lisensi publikasi." : "Tidak ada musik pihak ketiga."}
+              </p>
+              <p><CheckCircle2 /> Subtitle dan Brand Voice dapat diperiksa sebelum render.</p>
+            </section>
             <div className="editor-actions">
               <button onClick={onClose}>Cancel</button>
               <button
@@ -5530,6 +5946,12 @@ function ClipEditor({
                     transition,
                     captionAnimation,
                     audioGain,
+                    exportResolution,
+                    exportFps,
+                    exportBitrate,
+                    musicName,
+                    musicVolume,
+                    audioDucking,
                     brollName,
                     brollStart,
                     watermark,

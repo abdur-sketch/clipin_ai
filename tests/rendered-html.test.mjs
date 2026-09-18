@@ -492,3 +492,37 @@ test("Creator Intelligence adds multi-track editing, scenes, Brand Voice, repurp
   assert.match(schema, /brandVoice/);
   assert.match(migration, /brand_voice/);
 });
+
+test("production suite includes quality control, export presets, music ducking, versions, reviews, PWA, and safety checks", async () => {
+  const [page, media, versions, reviews, music, storage, manifest, worker, migration] =
+    await Promise.all([
+      source("app/page.tsx"),
+      source("lib/browser-media.ts"),
+      source("app/api/clips/[id]/versions/route.ts"),
+      source("app/api/clips/[id]/review/route.ts"),
+      source("app/api/clips/[id]/music/route.ts"),
+      source("app/api/storage/route.ts"),
+      source("app/manifest.ts"),
+      source("public/sw.js"),
+      source("drizzle/0016_sweet_starbolt.sql"),
+    ]);
+  for (const feature of [
+    "AI QUALITY CONTROL",
+    "EXPORT PRESETS",
+    "MUSIC & SOUND DESIGN",
+    "VERSION HISTORY",
+    "APPROVAL WORKFLOW",
+    "COPYRIGHT & SAFETY",
+    "STORAGE MANAGER",
+  ])
+    assert.ok(page.includes(feature), `missing ${feature}`);
+  assert.match(media, /exportResolution/);
+  assert.match(media, /audioDucking/);
+  assert.match(versions, /clip_versions/);
+  assert.match(reviews, /review_comments/);
+  assert.match(music, /music_key/);
+  assert.match(storage, /exports\/\$\{user\.id\}/);
+  assert.match(manifest, /display: "standalone"/);
+  assert.match(worker, /kliyu-shell-v1/);
+  assert.match(migration, /CREATE TABLE `clip_versions`/);
+});

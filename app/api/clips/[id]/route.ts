@@ -82,6 +82,14 @@ export async function PATCH(
   )
     ? String(body.captionAnimation)
     : "pop";
+  const exportResolution = ["720p", "1080p"].includes(
+    String(body.exportResolution),
+  )
+    ? String(body.exportResolution)
+    : "1080p";
+  const exportFps = [24, 30, 60].includes(Number(body.exportFps))
+    ? Number(body.exportFps)
+    : 30;
   const subtitles = Array.isArray(body.subtitles)
     ? body.subtitles
         .slice(0, 200)
@@ -138,7 +146,7 @@ export async function PATCH(
     hook = String(body.hook ?? "").trim();
   if (!title || !hook) return jsonError("Judul dan hook wajib diisi");
   await bindings.DB.prepare(
-    "UPDATE clips SET title=?,hook=?,caption=?,start_time=?,end_time=?,style=?,face_tracking=?,hook_overlay=?,captions_enabled=?,aspect_ratio=?,font_size=?,font_family=?,font_color=?,font_effect=?,title_effect=?,title_animation=?,title_position=?,caption_position=?,smart_cleanup=?,transcript_cut=?,audio_preset=?,noise_reduction=?,auto_level=?,speaker_colors=?,reframe_mode=?,crop_focus_x=?,transition=?,caption_animation=?,audio_gain=?,broll_start=?,subtitles=?,watermark=?,status='ready',rendered_key=NULL,updated_at=? WHERE id=?",
+    "UPDATE clips SET title=?,hook=?,caption=?,start_time=?,end_time=?,style=?,face_tracking=?,hook_overlay=?,captions_enabled=?,aspect_ratio=?,font_size=?,font_family=?,font_color=?,font_effect=?,title_effect=?,title_animation=?,title_position=?,caption_position=?,smart_cleanup=?,transcript_cut=?,audio_preset=?,noise_reduction=?,auto_level=?,speaker_colors=?,reframe_mode=?,crop_focus_x=?,transition=?,caption_animation=?,audio_gain=?,export_resolution=?,export_fps=?,export_bitrate=?,music_volume=?,audio_ducking=?,broll_start=?,subtitles=?,watermark=?,status='ready',rendered_key=NULL,updated_at=? WHERE id=?",
   )
     .bind(
       title,
@@ -172,6 +180,11 @@ export async function PATCH(
       transition,
       captionAnimation,
       Math.max(0.5, Math.min(1.5, Number(body.audioGain ?? 1))),
+      exportResolution,
+      exportFps,
+      Math.max(2, Math.min(16, Number(body.exportBitrate ?? 5))),
+      Math.max(0, Math.min(0.7, Number(body.musicVolume ?? 0.18))),
+      body.audioDucking === false ? 0 : 1,
       Math.max(0, Number(body.brollStart || 2)),
       JSON.stringify(subtitles),
       body.watermark ? 1 : 0,

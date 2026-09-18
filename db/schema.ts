@@ -79,6 +79,14 @@ export const clips = sqliteTable("clips", {
   transition: text("transition").notNull().default("fade"),
   captionAnimation: text("caption_animation").notNull().default("pop"),
   audioGain: real("audio_gain").notNull().default(1),
+  exportResolution: text("export_resolution").notNull().default("1080p"),
+  exportFps: integer("export_fps").notNull().default(30),
+  exportBitrate: integer("export_bitrate").notNull().default(5),
+  musicKey: text("music_key"),
+  musicVolume: real("music_volume").notNull().default(0.18),
+  audioDucking: integer("audio_ducking", { mode: "boolean" })
+    .notNull()
+    .default(true),
   brollKey: text("broll_key"),
   brollStart: real("broll_start").notNull().default(2),
   thumbnailKey: text("thumbnail_key"),
@@ -205,6 +213,26 @@ export const studioPreferences = sqliteTable("studio_preferences", {
   templates: text("templates").notNull().default("[]"),
   brandVoice: text("brand_voice").notNull().default("{}"),
   updatedAt: integer("updated_at").notNull(),
+});
+
+export const clipVersions = sqliteTable("clip_versions", {
+  id: text("id").primaryKey(),
+  clipId: text("clip_id").notNull(),
+  userId: text("user_id").notNull(),
+  label: text("label").notNull(),
+  snapshot: text("snapshot").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const reviewComments = sqliteTable("review_comments", {
+  id: text("id").primaryKey(),
+  clipId: text("clip_id").notNull(),
+  userId: text("user_id").notNull(),
+  author: text("author").notNull(),
+  message: text("message").notNull(),
+  timestamp: real("timestamp").notNull().default(0),
+  status: text("status").notNull().default("comment"),
+  createdAt: integer("created_at").notNull(),
 });
 
 export const subscriptions = sqliteTable("subscriptions", {
