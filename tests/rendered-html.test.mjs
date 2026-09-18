@@ -595,3 +595,30 @@ test("production v34 wires the seven critical foundations", async () => {
   assert.match(schema, /oauthStates/);
   assert.match(migration, /CREATE TABLE `oauth_states`/);
 });
+
+test("production v35 hardens local startup, imports, uploads, render, and restore", async () => {
+  const [pkg, migrator, localConfig, sourceImport, processRoute, upload, resumable, render, backup, project, notifications] = await Promise.all([
+    source("package.json"),
+    source("scripts/migrate-local.mjs"),
+    source("wrangler.local.jsonc"),
+    source("lib/source-import.ts"),
+    source("app/api/projects/[id]/process/route.ts"),
+    source("app/api/projects/[id]/upload/route.ts"),
+    source("app/api/projects/[id]/resumable/route.ts"),
+    source("app/api/clips/[id]/render/route.ts"),
+    source("app/api/backup/route.ts"),
+    source("app/api/projects/[id]/route.ts"),
+    source("app/api/notifications/route.ts"),
+  ]);
+  assert.match(pkg, /db:local:migrate/);
+  assert.match(migrator, /Local database is up to date/);
+  assert.match(localConfig, /"migrations_dir": "drizzle"/);
+  assert.match(sourceImport, /assertPublicHttpsUrl/);
+  assert.match(processRoute, /redirect: "manual"/);
+  assert.match(upload, /Ukuran video tidak valid/);
+  assert.match(resumable, /Bagian upload belum lengkap/);
+  assert.match(render, /URL hasil render tidak aman/);
+  assert.match(backup, /studio_preferences/);
+  assert.match(project, /project-delete/);
+  assert.match(notifications, /notification-read/);
+});

@@ -12,6 +12,7 @@ import {
   firebasePatch,
   firebaseSet,
 } from "@/lib/firebase";
+import { assertPublicHttpsUrl, importableVideoUrl } from "@/lib/source-import";
 
 type ProjectSource = {
   storage_key?: string;
@@ -31,13 +32,27 @@ type BrowserAnalysis = {
 async function ensureStoredSource(projectId: string, project: ProjectSource) {
   if (project.storage_key) return project.storage_key;
   if (!project.source_url) return null;
-  const source = await fetch(project.source_url, {
-    redirect: "follow",
-    headers: { "user-agent": "KLIYU/1.0 video importer" },
-  });
+  let current = importableVideoUrl(project.source_url).url;
+  let source: Response | null = null;
+  for (let redirect = 0; redirect < 5; redirect++) {
+    source = await fetch(current, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+      headers: { "user-agent": "KLIYU/1.0 video importer" },
+    });
+    if (![301, 302, 303, 307, 308].includes(source.status)) break;
+    const location = source.headers.get("location");
+    if (!location) throw new Error("Redirect sumber video tidak valid");
+    current = assertPublicHttpsUrl(new URL(location, current));
+    source = null;
+  }
+  if (!source) throw new Error("Terlalu banyak redirect pada link video");
   const contentType = source.headers.get("content-type") || "";
+  const contentLength = Number(source.headers.get("content-length") || 0);
   if (!source.ok || !source.body)
     throw new Error(`Video dari link tidak dapat diambil (${source.status})`);
+  if (contentLength > 4 * 1024 * 1024 * 1024)
+    throw new Error("Ukuran video melebihi batas 4 GB");
   if (!contentType.startsWith("video/"))
     throw new Error(
       "Link tersebut tidak menghasilkan file video. Pastikan link publik dan Anda memiliki izin menggunakannya.",
@@ -138,9 +153,16 @@ export async function POST(
         (segment) =>
           Number.isFinite(segment.start) &&
           Number.isFinite(segment.end) &&
+          segment.start >= 0 &&
+          segment.end <= 24 * 60 * 60 &&
           segment.end > segment.start &&
           segment.text,
-      );
+      )
+      .sort((a, b) => a.start - b.start);
+    const sourceDuration = segments.reduce(
+      (max, segment) => Math.max(max, segment.end),
+      0,
+    );
     const moments = (analysis.moments || [])
       .slice(0, 10)
       .map((moment) => ({
@@ -156,17 +178,17 @@ export async function POST(
         (moment) =>
           Number.isFinite(moment.start) &&
           Number.isFinite(moment.end) &&
+          moment.start >= 0 &&
           moment.end > moment.start &&
+          moment.end <= sourceDuration + 1 &&
           moment.end - moment.start <= 90 &&
           moment.title &&
           moment.hook,
-      );
+      )
+      .sort((a, b) => b.score - a.score);
     if (!transcript || !segments.length || !moments.length)
       throw new Error("Hasil Browser AI tidak lengkap");
-    const duration = segments.reduce(
-      (max, segment) => Math.max(max, segment.end),
-      0,
-    );
+    const duration = sourceDuration;
     const usedMinutes = Math.max(1, Math.ceil(duration / 60));
     await bindings.DB.prepare(
       "UPDATE projects SET progress=68,updated_at=? WHERE id=?",

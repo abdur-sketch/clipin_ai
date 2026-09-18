@@ -1,4 +1,4 @@
-import { bindings, currentUser, id as makeId, jsonError, syncD1Record } from "@/lib/server";
+import { bindings, currentUser, guardMutation, id as makeId, jsonError, syncD1Record } from "@/lib/server";
 import {
   firebaseDelete,
   firebaseGet,
@@ -95,6 +95,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guarded = guardMutation(request, "project-update");
+  if (guarded) return guarded;
   const user = await currentUser(),
     { id } = await params;
   const body = (await request.json()) as {
@@ -246,9 +248,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guarded = guardMutation(request, "project-delete");
+  if (guarded) return guarded;
   const user = await currentUser(),
     { id } = await params;
   const project = await bindings.DB.prepare(

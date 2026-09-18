@@ -1,4 +1,4 @@
-import { bindings, currentUser, jsonError, syncD1Record } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError, syncD1Record } from "@/lib/server";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser(), { id } = await params;
@@ -10,12 +10,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guarded = guardMutation(request, "logo-upload");
+  if (guarded) return guarded;
   const user = await currentUser(), { id } = await params;
   const owned = await bindings.DB.prepare("SELECT clips.id FROM clips JOIN projects ON projects.id=clips.project_id WHERE clips.id=? AND projects.user_id=?").bind(id,user.id).first();
   if (!owned) return jsonError("Clip tidak ditemukan",404);
   const contentType = request.headers.get("content-type") || "";
   if (!/^image\/(png|jpeg|webp)$/.test(contentType)) return jsonError("Logo harus berupa PNG, JPG, atau WebP",415);
   const size = Number(request.headers.get("content-length") || 0);
+  if (!Number.isFinite(size) || size <= 0) return jsonError("Ukuran logo tidak valid", 411);
   if (size > 5 * 1024 * 1024) return jsonError("Ukuran logo maksimum 5 MB",413);
   if (!request.body) return jsonError("File logo kosong");
   const key = `logos/${user.id}/${id}`;

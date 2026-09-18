@@ -10,7 +10,7 @@ const allowedCloudHosts = [
 ];
 
 function isPrivateHostname(hostname: string) {
-  const host = hostname.toLowerCase();
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   return (
     host === "localhost" ||
     host === "0.0.0.0" ||
@@ -23,10 +23,17 @@ function isPrivateHostname(hostname: string) {
   );
 }
 
-export function importableVideoUrl(value: string) {
-  const url = new URL(value);
+export function assertPublicHttpsUrl(value: string | URL) {
+  const url = value instanceof URL ? new URL(value) : new URL(value);
   if (url.protocol !== "https:" || isPrivateHostname(url.hostname))
     throw new Error("Link sumber harus menggunakan HTTPS publik");
+  if (url.username || url.password)
+    throw new Error("Link sumber tidak boleh berisi kredensial");
+  return url;
+}
+
+export function importableVideoUrl(value: string) {
+  const url = assertPublicHttpsUrl(value);
 
   if (url.hostname === "drive.google.com") {
     const fileId =
@@ -57,4 +64,3 @@ export function importableVideoUrl(value: string) {
     );
   return { provider: knownCloud ? "cloud" : "direct-url", url };
 }
-

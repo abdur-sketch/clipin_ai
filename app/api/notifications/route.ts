@@ -1,4 +1,4 @@
-import { bindings, currentUser, jsonError } from "@/lib/server";
+import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
 
 export async function GET() {
   const user = await currentUser();
@@ -7,6 +7,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  const guarded = guardMutation(request, "notification-read");
+  if (guarded) return guarded;
   const user = await currentUser();
   const body = await request.json() as { id?: string; all?: boolean };
   if (body.all) await bindings.DB.prepare("UPDATE notifications SET read=1 WHERE user_id=?").bind(user.id).run();

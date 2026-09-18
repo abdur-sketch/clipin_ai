@@ -1,6 +1,6 @@
 import { firebasePatch } from "@/lib/firebase";
 import { bindings, currentUser, guardMutation, jsonError } from "@/lib/server";
-import { importableVideoUrl } from "@/lib/source-import";
+import { assertPublicHttpsUrl, importableVideoUrl } from "@/lib/source-import";
 
 const maximumBytes = 2 * 1024 * 1024 * 1024;
 
@@ -23,10 +23,14 @@ export async function POST(
 
   try {
     const source = importableVideoUrl(project.source_url);
-    const response = await fetch(source.url, {
-      redirect: "follow",
-      headers: { "user-agent": "KLIYU/1.0 authorized media importer" },
-    });
+    let current=source.url,response:Response|null=null;
+    for(let redirect=0;redirect<5;redirect++){
+      response=await fetch(current,{redirect:"manual",signal:AbortSignal.timeout(30_000),headers:{"user-agent":"KLIYU/1.0 authorized media importer"}});
+      if(![301,302,303,307,308].includes(response.status))break;
+      const location=response.headers.get("location");if(!location)throw new Error("Redirect sumber video tidak valid");
+      current=assertPublicHttpsUrl(new URL(location,current));response=null;
+    }
+    if(!response)throw new Error("Terlalu banyak redirect pada link video");
     if (!response.ok || !response.body)
       return jsonError(`Video cloud tidak dapat diambil (${response.status})`, 422);
     const length = Number(response.headers.get("content-length") || 0);
